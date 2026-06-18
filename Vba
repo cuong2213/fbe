@@ -1,0 +1,382 @@
+Option Explicit
+
+' ============================================================
+' CONSTANTS
+' ============================================================
+Private Const TARGET_PREFIX As String = "3800_PS"
+
+' ============================================================
+' HELPER: Extract year from a date cell value
+' ============================================================
+Private Function GetYear(cellVal As Variant) As String
+    On Error GoTo NotDate
+    If IsEmpty(cellVal) Or cellVal = "" Then
+        GetYear = ""
+        Exit Function
+    End If
+    ' Try as Excel date serial
+    If IsDate(cellVal) Then
+        GetYear = CStr(Year(CDate(cellVal)))
+        Exit Function
+    End If
+NotDate:
+    On Error GoTo 0
+    ' Try extracting year from string "mm/dd/yyyy" or "dd-mm-yyyy"
+    Dim s As String
+    s = CStr(cellVal)
+    Dim parts() As String
+    If InStr(s, "/") > 0 Then
+        parts = Split(s, "/")
+        If UBound(parts) >= 2 Then
+            GetYear = Trim(parts(UBound(parts)))
+            Exit Function
+        End If
+    ElseIf InStr(s, "-") > 0 Then
+        parts = Split(s, "-")
+        If UBound(parts) >= 2 Then
+            GetYear = Trim(parts(UBound(parts)))
+            Exit Function
+        End If
+    End If
+    GetYear = ""
+End Function
+
+' ============================================================
+' HELPER: Find ALL column indices matching a header name
+' ============================================================
+Private Function FindColumns(ws As Worksheet, headerName As String) As Collection
+    Dim col As New Collection
+    Dim lastCol As Long
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    Dim i As Long
+    For i = 1 To lastCol
+        If Trim(ws.Cells(1, i).Value) = Trim(headerName) Then
+            col.Add i
+        End If
+    Next i
+    Set FindColumns = col
+End Function
+
+' ============================================================
+' HELPER: Find FIRST column index matching a header name
+' Returns 0 if not found
+' ============================================================
+Private Function FindColumn(ws As Worksheet, headerName As String) As Long
+    Dim cols As Collection
+    Set cols = FindColumns(ws, headerName)
+    If cols.Count > 0 Then
+        FindColumn = cols(1)
+    Else
+        FindColumn = 0
+    End If
+End Function
+
+' ============================================================
+' HELPER: Parse Work Station
+' Input : "3800_PSPT10LH"
+' Output: shop = "PS", area = "PT"
+' ============================================================
+Private Sub ParseWorkStation(wsVal As String, shopOut As String, areaOut As String)
+    shopOut = ""
+    areaOut = ""
+    Dim underPos As Long
+    underPos = InStr(wsVal, "_")
+    If underPos = 0 Then Exit Sub
+    Dim suffix As String
+    suffix = Mid(wsVal, underPos + 1) ' e.g. "PSPT10LH"
+    If Len(suffix) >= 4 Then
+        shopOut = Left(suffix, 2)   ' "PS"
+        areaOut = Mid(suffix, 3, 2) ' "PT"
+    End If
+End Sub
+
+' ============================================================
+' HELPER: Extract model name from file path
+' "C:\folder\xxx_ModelName.xlsx" -> "ModelName"
+' ============================================================
+Private Function ExtractModelName(filePath As String) As String
+    Dim fileName As String
+    fileName = Mid(filePath, InStrRev(filePath, "\") + 1)
+    If InStr(fileName, ".") > 0 Then
+        fileName = Left(fileName, InStrRev(fileName, ".") - 1)
+    End If
+    Dim underPos As Long
+    underPos = InStr(fileName, "_")
+    If underPos > 0 Then
+        ExtractModelName = Mid(fileName, underPos + 1)
+    Else
+        ExtractModelName = fileName
+    End If
+End Function
+
+' ============================================================
+' MAIN SUB
+' ============================================================
+Public Sub ProcessBOMFiles()
+
+    Dim wsInput As Worksheet
+    Dim wsMaster As Worksheet
+    Dim wsConsumption As Worksheet
+
+    Set wsInput = ThisWorkbook.Sheets(1)
+    Set wsMaster = ThisWorkbook.Sheets("Master_Material")
+    Set wsConsumption = ThisWorkbook.Sheets("Consumption_Data")
+
+    ' ----------------------------------------------------------
+    ' Collect file paths from column B, starting B2
+    ' ----------------------------------------------------------
+    Dim lastRow As Long
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "B").End(xlUp).Row
+
+    If lastRow < 2 Then
+        MsgBox "Khong co file path nao trong cot B!", vbExclamation
+        Exit Sub
+    End If
+
+    Dim filePaths() As String
+    ReDim filePaths(1 To lastRow - 1)
+    Dim fileCount As Long
+    fileCount = 0
+
+    Dim r As Long
+    For r = 2 To lastRow
+        Dim fp As String
+        fp = Trim(wsInput.Cells(r, "B").Value)
+        If fp <> "" Then
+            fileCount = fileCount + 1
+            filePaths(fileCount) = fp
+        End If
+    Next r
+
+    If fileCount = 0 Then
+        MsgBox "Khong co file path hop le!", vbExclamation
+        Exit Sub
+    End If
+
+    ' ----------------------------------------------------------
+    ' Prepare Master_Material
+    ' ----------------------------------------------------------
+    Dim masterNextRow As Long
+    masterNextRow = wsMaster.Cells(wsMaster.Rows.Count, "B").End(xlUp).Row + 1
+    If masterNextRow < 2 Then masterNextRow = 2
+
+    ' Pre-load existing material codes to avoid duplicates
+    Dim dictMaterial As Object
+    Set dictMaterial = CreateObject("Scripting.Dictionary")
+
+    Dim existRow As Long
+    For existRow = 2 To masterNextRow - 1
+        Dim existCode As String
+        existCode = Trim(wsMaster.Cells(existRow, "B").Value)
+        If existCode <> "" Then
+            If Not dictMaterial.Exists(existCode) Then
+                dictMaterial.Add existCode, True
+            End If
+        End If
+    Next existRow
+
+    ' ----------------------------------------------------------
+    ' Prepare Consumption_Data
+    ' ----------------------------------------------------------
+    Dim consNextRow As Long
+    consNextRow = wsConsumption.Cells(wsConsumption.Rows.Count, "B").End(xlUp).Row + 1
+    If consNextRow < 2 Then consNextRow = 2
+
+    Dim consSTT As Long
+    consSTT = 0
+    If consNextRow > 2 Then
+        Dim lastSTT As Variant
+        lastSTT = wsConsumption.Cells(consNextRow - 1, "A").Value
+        If IsNumeric(lastSTT) Then consSTT = CLng(lastSTT)
+    End If
+
+    ' ----------------------------------------------------------
+    ' Loop through each BOM file
+    ' ----------------------------------------------------------
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    Dim fileIdx As Long
+    For fileIdx = 1 To fileCount
+
+        Dim bomPath As String
+        bomPath = filePaths(fileIdx)
+
+        If Dir(bomPath) = "" Then
+            MsgBox "File khong ton tai: " & bomPath & Chr(10) & "Bo qua file nay.", vbExclamation
+            GoTo NextFile
+        End If
+
+        Dim modelName As String
+        modelName = ExtractModelName(bomPath)
+
+        ' Open BOM file read-only
+        Dim wbBOM As Workbook
+        On Error GoTo FileOpenError
+        Set wbBOM = Workbooks.Open(bomPath, ReadOnly:=True, UpdateLinks:=False)
+        On Error GoTo 0
+
+        Dim wsBOM As Worksheet
+        Set wsBOM = wbBOM.Sheets(1)
+
+        ' ----------------------------------------------------------
+        ' Find columns by header name
+        ' ----------------------------------------------------------
+
+        ' Material: 1st occurrence = model code, 2nd = material code
+        Dim colsMat As Collection
+        Set colsMat = FindColumns(wsBOM, "Material")
+        Dim colModelCode As Long
+        Dim colMatCode As Long
+        colModelCode = 0
+        colMatCode = 0
+        If colsMat.Count >= 2 Then
+            colModelCode = colsMat(1)
+            colMatCode = colsMat(2)
+        ElseIf colsMat.Count = 1 Then
+            colMatCode = colsMat(1)
+        End If
+
+        Dim colMatDesc As Long
+        colMatDesc = FindColumn(wsBOM, "Material Description")
+
+        Dim colQty As Long
+        colQty = FindColumn(wsBOM, "Quantity")
+
+        Dim colUnit As Long
+        colUnit = FindColumn(wsBOM, "Unit of measure")
+
+        ' Valid From: 1st and 2nd occurrence
+        Dim colsVF As Collection
+        Set colsVF = FindColumns(wsBOM, "Valid From")
+        Dim colVF1 As Long
+        Dim colVF2 As Long
+        colVF1 = 0
+        colVF2 = 0
+        If colsVF.Count >= 2 Then
+            colVF1 = colsVF(1)
+            colVF2 = colsVF(2)
+        ElseIf colsVF.Count = 1 Then
+            colVF1 = colsVF(1)
+        End If
+
+        Dim colVT As Long
+        colVT = FindColumn(wsBOM, "Valid To")
+
+        Dim colWS As Long
+        colWS = FindColumn(wsBOM, "Work Station")
+
+        Dim colVTD As Long
+        colVTD = FindColumn(wsBOM, "Valid-To Date")
+
+        ' Validate required columns
+        If colMatCode = 0 Or colWS = 0 Then
+            MsgBox "File: " & bomPath & Chr(10) & _
+                   "Khong tim thay cot 'Material' hoac 'Work Station'. Bo qua.", vbExclamation
+            wbBOM.Close False
+            GoTo NextFile
+        End If
+
+        ' ----------------------------------------------------------
+        ' Read data rows
+        ' ----------------------------------------------------------
+        Dim bomLastRow As Long
+        bomLastRow = wsBOM.Cells(wsBOM.Rows.Count, colMatCode).End(xlUp).Row
+
+        Dim dataRow As Long
+        For dataRow = 2 To bomLastRow
+
+            ' --- Work Station value ---
+            Dim wsValStr As String
+            wsValStr = Trim(wsBOM.Cells(dataRow, colWS).Value)
+
+            ' --- Filter: must start with "3800_PS" ---
+            If Left(UCase(wsValStr), Len(TARGET_PREFIX)) <> UCase(TARGET_PREFIX) Then
+                GoTo NextRow
+            End If
+
+            ' --- Parse Area dynamically ---
+            Dim shopStr As String
+            Dim areaStr As String
+            ParseWorkStation wsValStr, shopStr, areaStr
+
+            ' --- Filter: Valid From 1 year <> 9999 ---
+            If colVF1 > 0 Then
+                If GetYear(wsBOM.Cells(dataRow, colVF1).Value) = "9999" Then GoTo NextRow
+            End If
+
+            ' --- Filter: Valid From 2 year <> 9999 ---
+            If colVF2 > 0 Then
+                If GetYear(wsBOM.Cells(dataRow, colVF2).Value) = "9999" Then GoTo NextRow
+            End If
+
+            ' --- Filter: Valid To year = 9999 ---
+            If colVT > 0 Then
+                If GetYear(wsBOM.Cells(dataRow, colVT).Value) <> "9999" Then GoTo NextRow
+            End If
+
+            ' --- Filter: Valid-To Date year = 9999 ---
+            If colVTD > 0 Then
+                If GetYear(wsBOM.Cells(dataRow, colVTD).Value) <> "9999" Then GoTo NextRow
+            End If
+
+            ' --- Extract values ---
+            Dim matCode As String
+            Dim matDesc As String
+            Dim matUnit As String
+            Dim matQty As Variant
+
+            matCode = Trim(wsBOM.Cells(dataRow, colMatCode).Value)
+            matDesc = ""
+            If colMatDesc > 0 Then matDesc = Trim(wsBOM.Cells(dataRow, colMatDesc).Value)
+            matUnit = ""
+            If colUnit > 0 Then matUnit = Trim(wsBOM.Cells(dataRow, colUnit).Value)
+            matQty = ""
+            If colQty > 0 Then matQty = wsBOM.Cells(dataRow, colQty).Value
+
+            ' ======================================================
+            ' Write to Master_Material (unique material code only)
+            ' ======================================================
+            If matCode <> "" Then
+                If Not dictMaterial.Exists(matCode) Then
+                    dictMaterial.Add matCode, True
+                    wsMaster.Cells(masterNextRow, "B").Value = matCode   ' Material Code
+                    wsMaster.Cells(masterNextRow, "C").Value = matDesc   ' Material Name
+                    wsMaster.Cells(masterNextRow, "D").Value = areaStr   ' Area (dynamic)
+                    wsMaster.Cells(masterNextRow, "E").Value = matUnit   ' Unit
+                    masterNextRow = masterNextRow + 1
+                End If
+            End If
+
+            ' ======================================================
+            ' Write to Consumption_Data
+            ' ======================================================
+            consSTT = consSTT + 1
+            wsConsumption.Cells(consNextRow, "A").Value = consSTT   ' STT
+            wsConsumption.Cells(consNextRow, "B").Value = areaStr   ' Area (dynamic)
+            wsConsumption.Cells(consNextRow, "C").Value = modelName ' Model
+            wsConsumption.Cells(consNextRow, "D").Value = matCode   ' Material Code
+            wsConsumption.Cells(consNextRow, "E").Value = matDesc   ' Material Name
+            wsConsumption.Cells(consNextRow, "F").Value = matQty    ' Q'ty
+            wsConsumption.Cells(consNextRow, "G").Value = matUnit   ' Unit
+            consNextRow = consNextRow + 1
+
+NextRow:
+        Next dataRow
+
+        wbBOM.Close False
+
+NextFile:
+    Next fileIdx
+
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+
+    MsgBox "Hoan thanh! Da xu ly " & fileCount & " file BOM.", vbInformation
+    Exit Sub
+
+FileOpenError:
+    MsgBox "Loi mo file: " & bomPath, vbCritical
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+End Sub
