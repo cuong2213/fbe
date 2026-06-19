@@ -1,0 +1,338 @@
+Option Explicit
+
+' ================================================================
+' MODULE: Process Plastic Part BOM Files
+' File name format: xxx_SINGLE_[Model].XLSX
+' Required sheets in THIS workbook:
+'   - Sheets(1)            -> input sheet, file paths in column B from B2
+'   - "Master_Material"    -> output: unique material list
+'   - "Consumption_Plastic"-> output: consumption detail per model
+' ================================================================
+
+Private Const PLASTIC_FILE_PREFIX As String = "_SINGLE_"
+
+' ============================================================
+' HELPER: Extract year from a date cell value (mm/dd/yyyy)
+' ============================================================
+Private Function GetYear_Plastic(cellVal As Variant) As String
+    On Error GoTo NotDate
+    If IsEmpty(cellVal) Or cellVal = "" Then
+        GetYear_Plastic = ""
+        Exit Function
+    End If
+    If IsDate(cellVal) Then
+        GetYear_Plastic = CStr(Year(CDate(cellVal)))
+        Exit Function
+    End If
+NotDate:
+    On Error GoTo 0
+    Dim s As String
+    s = CStr(cellVal)
+    Dim parts() As String
+    If InStr(s, "/") > 0 Then
+        parts = Split(s, "/")
+        If UBound(parts) >= 2 Then
+            GetYear_Plastic = Trim(parts(UBound(parts)))
+            Exit Function
+        End If
+    ElseIf InStr(s, "-") > 0 Then
+        parts = Split(s, "-")
+        If UBound(parts) >= 2 Then
+            GetYear_Plastic = Trim(parts(UBound(parts)))
+            Exit Function
+        End If
+    End If
+    GetYear_Plastic = ""
+End Function
+
+' ============================================================
+' HELPER: Find ALL column indices matching a header name (case-insensitive)
+' ============================================================
+Private Function FindColumns_Plastic(ws As Worksheet, headerName As String) As Collection
+    Dim col As New Collection
+    Dim lastCol As Long
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    Dim i As Long
+    For i = 1 To lastCol
+        If UCase(Trim(ws.Cells(1, i).Value)) = UCase(Trim(headerName)) Then
+            col.Add i
+        End If
+    Next i
+    Set FindColumns_Plastic = col
+End Function
+
+' ============================================================
+' HELPER: Find FIRST column index matching a header name
+' Returns 0 if not found
+' ============================================================
+Private Function FindColumn_Plastic(ws As Worksheet, headerName As String) As Long
+    Dim cols As Collection
+    Set cols = FindColumns_Plastic(ws, headerName)
+    If cols.Count > 0 Then
+        FindColumn_Plastic = cols(1)
+    Else
+        FindColumn_Plastic = 0
+    End If
+End Function
+
+' ============================================================
+' HELPER: Extract model name from file path
+' "C:\folder\xxx_SINGLE_ModelName.xlsx" -> "ModelName"
+' ============================================================
+Private Function ExtractModelName_Plastic(filePath As String) As String
+    Dim fileName As String
+    fileName = Mid(filePath, InStrRev(filePath, "\") + 1)
+    If InStr(fileName, ".") > 0 Then
+        fileName = Left(fileName, InStrRev(fileName, ".") - 1)
+    End If
+
+    Dim pos As Long
+    pos = InStr(UCase(fileName), UCase(PLASTIC_FILE_PREFIX))
+    If pos > 0 Then
+        ExtractModelName_Plastic = Mid(fileName, pos + Len(PLASTIC_FILE_PREFIX))
+    Else
+        Dim underPos As Long
+        underPos = InStrRev(fileName, "_")
+        If underPos > 0 Then
+            ExtractModelName_Plastic = Mid(fileName, underPos + 1)
+        Else
+            ExtractModelName_Plastic = fileName
+        End If
+    End If
+End Function
+
+' ============================================================
+' MAIN SUB - Plastic Part Processing
+' ============================================================
+Public Sub ProcessPlasticFiles()
+
+    Dim wsInput As Worksheet
+    Dim wsMaster As Worksheet
+    Dim wsConsumption As Worksheet
+
+    Set wsInput = ThisWorkbook.Sheets(1) ' Doi ten/index neu can
+    Set wsMaster = ThisWorkbook.Sheets("Master_Material")
+    Set wsConsumption = ThisWorkbook.Sheets("Consumption_Plastic")
+
+    ' ----------------------------------------------------------
+    ' Collect file paths from column B, starting B2
+    ' ----------------------------------------------------------
+    Dim lastRow As Long
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "B").End(xlUp).Row
+
+    If lastRow < 2 Then
+        MsgBox "Khong co file path nao trong cot B!", vbExclamation
+        Exit Sub
+    End If
+
+    Dim filePaths() As String
+    ReDim filePaths(1 To lastRow - 1)
+    Dim fileCount As Long
+    fileCount = 0
+
+    Dim r As Long
+    For r = 2 To lastRow
+        Dim fp As String
+        fp = Trim(wsInput.Cells(r, "B").Value)
+        If fp <> "" Then
+            fileCount = fileCount + 1
+            filePaths(fileCount) = fp
+        End If
+    Next r
+
+    If fileCount = 0 Then
+        MsgBox "Khong co file path hop le!", vbExclamation
+        Exit Sub
+    End If
+
+    ' ----------------------------------------------------------
+    ' Prepare Master_Material
+    ' ----------------------------------------------------------
+    Dim masterNextRow As Long
+    masterNextRow = wsMaster.Cells(wsMaster.Rows.Count, "B").End(xlUp).Row + 1
+    If masterNextRow < 2 Then masterNextRow = 2
+
+    Dim dictMaterial As Object
+    Set dictMaterial = CreateObject("Scripting.Dictionary")
+
+    Dim existRow As Long
+    For existRow = 2 To masterNextRow - 1
+        Dim existCode As String
+        existCode = Trim(wsMaster.Cells(existRow, "B").Value)
+        If existCode <> "" Then
+            If Not dictMaterial.Exists(existCode) Then
+                dictMaterial.Add existCode, True
+            End If
+        End If
+    Next existRow
+
+    ' ----------------------------------------------------------
+    ' Prepare Consumption_Plastic
+    ' ----------------------------------------------------------
+    Dim consNextRow As Long
+    consNextRow = wsConsumption.Cells(wsConsumption.Rows.Count, "B").End(xlUp).Row + 1
+    If consNextRow < 2 Then consNextRow = 2
+
+    Dim consSTT As Long
+    consSTT = 0
+    If consNextRow > 2 Then
+        Dim lastSTT As Variant
+        lastSTT = wsConsumption.Cells(consNextRow - 1, "A").Value
+        If IsNumeric(lastSTT) Then consSTT = CLng(lastSTT)
+    End If
+
+    ' ----------------------------------------------------------
+    ' Loop through each Plastic BOM file
+    ' ----------------------------------------------------------
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    Dim fileIdx As Long
+    Dim bomPath As String
+
+    For fileIdx = 1 To fileCount
+
+        bomPath = filePaths(fileIdx)
+
+        If Dir(bomPath) = "" Then
+            MsgBox "File khong ton tai: " & bomPath & Chr(10) & "Bo qua file nay.", vbExclamation
+            GoTo NextFile
+        End If
+
+        Dim modelName As String
+        modelName = ExtractModelName_Plastic(bomPath)
+
+        Dim wbBOM As Workbook
+        Set wbBOM = Nothing
+        On Error GoTo FileOpenError
+        Set wbBOM = Workbooks.Open(bomPath, ReadOnly:=True, UpdateLinks:=False)
+        On Error GoTo 0
+
+        Dim wsBOM As Worksheet
+        Set wsBOM = wbBOM.Sheets(1)
+
+        ' ----------------------------------------------------------
+        ' Find columns by header name
+        ' ----------------------------------------------------------
+        Dim colMaterial As Long
+        colMaterial = FindColumn_Plastic(wsBOM, "Material")
+
+        Dim colMatDesc As Long
+        colMatDesc = FindColumn_Plastic(wsBOM, "Material Description")
+
+        Dim colComponent As Long
+        colComponent = FindColumn_Plastic(wsBOM, "Component")
+
+        Dim colBOMDesc As Long
+        colBOMDesc = FindColumn_Plastic(wsBOM, "BOM Description")
+
+        Dim colQty As Long
+        colQty = FindColumn_Plastic(wsBOM, "Quantity")
+
+        Dim colUoM As Long
+        colUoM = FindColumn_Plastic(wsBOM, "UoM")
+
+        Dim colValidFrom As Long
+        colValidFrom = FindColumn_Plastic(wsBOM, "Valid from")
+
+        Dim colValidDateTo As Long
+        colValidDateTo = FindColumn_Plastic(wsBOM, "Valid Date To")
+
+        ' Validate required columns
+        If colMaterial = 0 Or colComponent = 0 Then
+            MsgBox "File: " & bomPath & Chr(10) & _
+                   "Khong tim thay cot 'Material' hoac 'Component'. Bo qua.", vbExclamation
+            wbBOM.Close False
+            GoTo NextFile
+        End If
+
+        ' ----------------------------------------------------------
+        ' Read data rows (start row 2)
+        ' ----------------------------------------------------------
+        Dim bomLastRow As Long
+        bomLastRow = wsBOM.Cells(wsBOM.Rows.Count, colMaterial).End(xlUp).Row
+
+        Dim dataRow As Long
+        For dataRow = 2 To bomLastRow
+
+            ' --- Filter: Valid From year <> 9999 ---
+            If colValidFrom > 0 Then
+                If GetYear_Plastic(wsBOM.Cells(dataRow, colValidFrom).Value) = "9999" Then
+                    GoTo NextRow
+                End If
+            End If
+
+            ' --- Filter: Valid Date To year = 9999 ---
+            If colValidDateTo > 0 Then
+                If GetYear_Plastic(wsBOM.Cells(dataRow, colValidDateTo).Value) <> "9999" Then
+                    GoTo NextRow
+                End If
+            End If
+
+            ' --- Extract values ---
+            Dim partNumber As String
+            Dim partName As String
+            Dim componentVal As String
+            Dim bomDescVal As String
+            Dim qtyVal As Variant
+            Dim uomVal As String
+
+            partNumber = Trim(wsBOM.Cells(dataRow, colMaterial).Value)
+            partName = ""
+            If colMatDesc > 0 Then partName = Trim(wsBOM.Cells(dataRow, colMatDesc).Value)
+            componentVal = ""
+            If colComponent > 0 Then componentVal = Trim(wsBOM.Cells(dataRow, colComponent).Value)
+            bomDescVal = ""
+            If colBOMDesc > 0 Then bomDescVal = Trim(wsBOM.Cells(dataRow, colBOMDesc).Value)
+            qtyVal = ""
+            If colQty > 0 Then qtyVal = wsBOM.Cells(dataRow, colQty).Value
+            uomVal = ""
+            If colUoM > 0 Then uomVal = Trim(wsBOM.Cells(dataRow, colUoM).Value)
+
+            ' ======================================================
+            ' Write to Master_Material (unique by Component code)
+            ' ======================================================
+            If componentVal <> "" Then
+                If Not dictMaterial.Exists(componentVal) Then
+                    dictMaterial.Add componentVal, True
+                    wsMaster.Cells(masterNextRow, "B").Value = componentVal ' Material Code
+                    wsMaster.Cells(masterNextRow, "C").Value = bomDescVal   ' Material Name
+                    wsMaster.Cells(masterNextRow, "E").Value = uomVal       ' Unit
+                    masterNextRow = masterNextRow + 1
+                End If
+            End If
+
+            ' ======================================================
+            ' Write to Consumption_Plastic
+            ' STT | Model | Part Number | Part Name | Component | BOM Description | Q'ty | UoM
+            ' ======================================================
+            consSTT = consSTT + 1
+            wsConsumption.Cells(consNextRow, "A").Value = consSTT        ' STT
+            wsConsumption.Cells(consNextRow, "B").Value = modelName      ' Model
+            wsConsumption.Cells(consNextRow, "C").Value = partNumber     ' Part Number
+            wsConsumption.Cells(consNextRow, "D").Value = partName       ' Part Name
+            wsConsumption.Cells(consNextRow, "E").Value = componentVal   ' Component
+            wsConsumption.Cells(consNextRow, "F").Value = bomDescVal     ' BOM Description
+            wsConsumption.Cells(consNextRow, "G").Value = qtyVal         ' Q'ty
+            wsConsumption.Cells(consNextRow, "H").Value = uomVal         ' UoM
+            consNextRow = consNextRow + 1
+
+NextRow:
+        Next dataRow
+
+        wbBOM.Close False
+
+NextFile:
+    Next fileIdx
+
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+
+    MsgBox "Hoan thanh! Da xu ly " & fileCount & " file Plastic BOM.", vbInformation
+    Exit Sub
+
+FileOpenError:
+    MsgBox "Loi mo file: " & bomPath, vbCritical
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+End Sub
