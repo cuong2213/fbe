@@ -1,0 +1,224 @@
+Option Explicit
+
+Sub A01_Temp_Zone1()
+
+ 'Khai bao bien
+
+ Dim wsRead As Worksheet
+ Dim wsChart As Worksheet
+ Dim wsTemplate As Worksheet
+
+ Dim LastCol As Long
+ Dim r As Long
+ Dim c As Long
+
+ Dim DataRow As Long
+
+ Dim ColOut As Long
+
+ Dim ChartObj As ChartObject
+ Dim cht As Chart
+
+ Dim S As Series
+
+ Const ChartName As String = "ChartZone1_Temp"
+
+ Set wsRead = Worksheets("Read_data_by_requirement")
+ Set wsChart = Worksheets("Data_chart_by_requirement")
+ Set wsTemplate = Worksheets("template_report")
+
+ 'Xoa du lieu cu (chi xoa sheet du lieu trung gian, KHONG dung cham vao template)
+
+ wsChart.Cells.Clear
+
+ 'Tim dong can lay du lieu
+
+ DataRow = 0
+
+ For r = 1 To wsRead.Cells(wsRead.Rows.Count, "A").End(xlUp).Row
+
+ If InStr(1, wsRead.Cells(r, 1).Value, "Zone1 HotWater", vbTextCompare) > 0 _
+ And InStr(1, wsRead.Cells(r, 3).Value, "Temperature", vbTextCompare) > 0 Then
+
+ DataRow = r
+ Exit For
+
+ End If
+
+ Next r
+
+ If DataRow = 0 Then Exit Sub
+
+ LastCol = wsRead.Cells(1, wsRead.Columns.Count).End(xlToLeft).Column
+
+ 'Nhan ca o cot A, hang 3-5
+
+ wsChart.Cells(3, 1) = "S1"
+ wsChart.Cells(4, 1) = "S2"
+ wsChart.Cells(5, 1) = "S3"
+
+ ColOut = 2
+
+ 'Chuyen du lieu: hang 1 = ngay, hang 2 = ten ca, hang 3-5 = gia tri dung vao dong ca tuong ung
+
+ For c = 5 To LastCol Step 3
+
+ If c <= LastCol Then
+
+ wsChart.Cells(1, ColOut).Value = wsRead.Cells(1, c).Value
+ wsChart.Cells(2, ColOut).Value = "S1"
+ wsChart.Cells(3, ColOut).Value = wsRead.Cells(DataRow, c).Value
+ ColOut = ColOut + 1
+
+ End If
+
+ If c + 1 <= LastCol Then
+
+ wsChart.Cells(1, ColOut).Value = wsRead.Cells(1, c).Value
+ wsChart.Cells(2, ColOut).Value = "S2"
+ wsChart.Cells(4, ColOut).Value = wsRead.Cells(DataRow, c + 1).Value
+ ColOut = ColOut + 1
+
+ End If
+
+ If c + 2 <= LastCol Then
+
+ wsChart.Cells(1, ColOut).Value = wsRead.Cells(1, c).Value
+ wsChart.Cells(2, ColOut).Value = "S3"
+ wsChart.Cells(5, ColOut).Value = wsRead.Cells(DataRow, c + 2).Value
+ ColOut = ColOut + 1
+
+ End If
+
+ Next c
+
+ 'Dinh dang ngay
+
+ wsChart.Rows(1).NumberFormat = "dd/mm"
+
+ 'Xoa chart cu TREN TEMPLATE (chi xoa dung chart minh tao, khong dung vao phan khac cua template)
+
+ For Each ChartObj In wsTemplate.ChartObjects
+ If ChartObj.Name = ChartName Then
+ ChartObj.Delete
+ Exit For
+ End If
+ Next
+
+ 'Tao chart moi, dat tai vi tri o C2 cua template_report
+
+ Set ChartObj = wsTemplate.ChartObjects.Add( _
+ wsTemplate.Range("C2").Left, _
+ wsTemplate.Range("C2").Top, _
+ 1100, 500)
+
+ ChartObj.Name = ChartName
+
+ Set cht = ChartObj.Chart
+
+ cht.ChartType = xlLineMarkers
+
+ Do While cht.SeriesCollection.Count > 0
+ cht.SeriesCollection(1).Delete
+ Loop
+
+ 'Them S1
+
+ Set S = cht.SeriesCollection.NewSeries
+
+ S.Name = "S1"
+ S.Values = wsChart.Range(wsChart.Cells(3, 2), wsChart.Cells(3, ColOut - 1))
+ S.XValues = wsChart.Range(wsChart.Cells(1, 2), wsChart.Cells(1, ColOut - 1))
+
+ 'Them S2
+
+ Set S = cht.SeriesCollection.NewSeries
+
+ S.Name = "S2"
+ S.Values = wsChart.Range(wsChart.Cells(4, 2), wsChart.Cells(4, ColOut - 1))
+ S.XValues = wsChart.Range(wsChart.Cells(1, 2), wsChart.Cells(1, ColOut - 1))
+
+ 'Them S3
+
+ Set S = cht.SeriesCollection.NewSeries
+
+ S.Name = "S3"
+ S.Values = wsChart.Range(wsChart.Cells(5, 2), wsChart.Cells(5, ColOut - 1))
+ S.XValues = wsChart.Range(wsChart.Cells(1, 2), wsChart.Cells(1, ColOut - 1))
+
+ 'Dinh dang tung duong
+
+ With cht.SeriesCollection(1)
+
+ .Format.Line.ForeColor.RGB = RGB(255, 0, 0)
+ .Format.Line.Weight = 1.5
+
+ .MarkerStyle = xlMarkerStyleCircle
+ .MarkerSize = 6
+ .MarkerForegroundColor = RGB(255, 0, 0)
+ .MarkerBackgroundColor = RGB(255, 0, 0)
+
+ End With
+
+ With cht.SeriesCollection(2)
+
+ .Format.Line.ForeColor.RGB = RGB(0, 0, 0)
+ .Format.Line.Weight = 1.5
+
+ .MarkerStyle = xlMarkerStyleCircle
+ .MarkerSize = 6
+ .MarkerForegroundColor = RGB(0, 0, 0)
+ .MarkerBackgroundColor = RGB(0, 0, 0)
+
+ End With
+
+ With cht.SeriesCollection(3)
+
+ .Format.Line.ForeColor.RGB = RGB(0, 112, 192)
+ .Format.Line.Weight = 1.5
+
+ .MarkerStyle = xlMarkerStyleCircle
+ .MarkerSize = 6
+ .MarkerForegroundColor = RGB(0, 112, 192)
+ .MarkerBackgroundColor = RGB(0, 112, 192)
+
+ End With
+
+ 'Truc tung
+
+ With cht.Axes(xlValue)
+
+ .MinimumScale = 30
+ .MaximumScale = 57
+ .MajorUnit = 1
+
+ .HasMajorGridlines = True
+
+ .MajorGridlines.Format.Line.ForeColor.RGB = RGB(210, 210, 210)
+
+ End With
+
+ 'Truc hoanh
+
+ With cht.Axes(xlCategory)
+
+ .TickLabels.NumberFormat = "dd/mm"
+
+ .HasMajorGridlines = True
+
+ .MajorGridlines.Format.Line.ForeColor.RGB = RGB(210, 210, 210)
+
+ End With
+
+ 'Nen trong suot
+
+ cht.ChartArea.Format.Fill.Visible = msoFalse
+ cht.PlotArea.Format.Fill.Visible = msoFalse
+
+ cht.Legend.Position = xlLegendPositionBottom
+
+ 'Hidden and Empty Cell Settings: cho phep noi diem qua o trong
+
+ cht.DisplayBlanksAs = xlInterpolated
+
+End Sub
