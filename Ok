@@ -1,0 +1,409 @@
+Option Explicit
+
+'======================================================================================
+' MODULE: modBOMHistory
+' MUC DICH: Doc SharePointData, tinh gia tri ton kho, luu lich su theo ngay vao BOM_History
+' CACH DUNG: Copy toan bo noi dung nay vao 1 Module chuan (Alt+F11 > Insert > Module),
+'            sau do goi SaveBOMHistory tu cho ban dang xu ly refresh SharePoint xong.
+' LUU Y VE DAU TIENG VIET: toan bo code va comment trong file nay deu la ky tu ASCII
+' thuan (khong dau) de tranh loi vo font/ma hoa khi dan vao VBA Editor. Rieng tieu de
+' cot tren sheet SharePointData ("Ton MB52" (co dau)) van co the co dau binh thuong - ham
+' BoDauTiengViet ben duoi se tu dong bo dau truoc khi so sanh nen khong can go dau
+' trong code.
+'======================================================================================
+
+'--------------------------------------------------------------------------------------
+' CAU HINH - CHI CAN SUA O DAY NEU CAU TRUC FILE THAY DOI
+'--------------------------------------------------------------------------------------
+Private Const SHEET_SP         As String = "SharePointData"
+Private Const SHEET_HIST       As String = "BOM_History"
+
+Private Const HEADER_ROW_SP    As Long = 2     ' Hang tieu de SharePointData (data tu hang 3)
+Private Const HEADER_ROW_HIST  As Long = 1     ' Hang tieu de BOM_History (data tu hang 2)
+
+Private Const COL_MAT          As Long = 1     ' Cot A = Material
+Private Const COL_NAME         As Long = 2     ' Cot B = Material Name
+Private Const FIRST_HIST_COL   As Long = 3     ' Cot C = cot lich su dau tien
+
+' Ten tieu de can tim tren SharePointData - GO KHONG DAU, ham TimCot se tu bo dau
+' cua tieu de thuc te tren sheet roi so sanh, nen van khop voi "Ton MB52" (co dau).
+Private Const HEADER_PNUMBER   As String = "P/Number"
+Private Const HEADER_PARTNAME  As String = "Part Name"
+Private Const HEADER_REALSTOCK As String = "Sum Real Stock"
+Private Const HEADER_MB52      As String = "Ton MB52"
+
+' Bat/tat: neu cot lich su MOI TAO giong het cot ngay truoc do thi tu xoa (tranh luu
+' trung khi du lieu khong doi qua nhieu ngay). Dat False neu khong can tinh nang nay.
+Private Const ENABLE_DEDUP_COLUMN As Boolean = True
+
+
+'======================================================================================
+' ENTRY POINT - GOI HAM NAY SAU KHI SharePointData DA REFRESH XONG
+'======================================================================================
+Public Sub SaveBOMHistory()
+
+    Dim wsSP As Worksheet, wsHist As Worksheet
+    Dim spDict As Object
+    Dim lastRow As Long, targetCol As Long, isNewCol As Boolean
+
+    On Error GoTo ErrHandler
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+
+    Set wsSP = ThisWorkbook.Worksheets(SHEET_SP)
+    Set wsHist = ThisWorkbook.Worksheets(SHEET_HIST)
+
+    EnsureHeaders wsHist
+
+    ' 1) Doc & tinh du lieu tu SharePointData
+    Set spDict = ReadSharePointData(wsSP)
+    If spDict Is Nothing Or spDict.Count = 0 Then
+        MsgBox "Khong co du lieu trong sheet '" & SHEET_SP & "' de luu lich su.", vbExclamation
+        GoTo CleanExit
+    End If
+
+    ' 2) Xac dinh cot lich su se ghi (ghi de neu trung ngay, tao moi neu khac ngay)
+    lastRow = wsHist.Cells(wsHist.Rows.Count, COL_MAT).End(xlUp).Row
+    If lastRow < HEADER_ROW_HIST Then lastRow = HEADER_ROW_HIST
+    targetCol = GetOrCreateHistoryColumn(wsHist, lastRow, isNewCol)
+
+    ' 3) Ghi du lieu vao BOM_History (cap nhat dong cu + them dong moi neu co)
+    WriteHistoryColumn wsHist, spDict, targetCol, lastRow
+
+    ' 4) Neu cot vua tao la cot MOI va giong het cot lien truoc -> xoa (tranh luu trung)
+    If ENABLE_DEDUP_COLUMN And isNewCol Then
+        If IsIdenticalToPreviousColumn(wsHist, targetCol) Then
+            wsHist.Columns(targetCol).Delete
+        End If
+    End If
+
+CleanExit:
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Loi khi luu lich su ton kho: " & Err.Description, vbCritical
+    Resume CleanExit
+End Sub
+
+
+'======================================================================================
+' Dam bao BOM_History co tieu de A1 = "Material", B1 = "Material Name"
+'======================================================================================
+Private Sub EnsureHeaders(ByVal wsHist As Worksheet)
+    If Trim(CStr(wsHist.Cells(HEADER_ROW_HIST, COL_MAT).Value)) = "" Then _
+        wsHist.Cells(HEADER_ROW_HIST, COL_MAT).Value = "Material"
+    If Trim(CStr(wsHist.Cells(HEADER_ROW_HIST, COL_NAME).Value)) = "" Then _
+        wsHist.Cells(HEADER_ROW_HIST, COL_NAME).Value = "Material Name"
+End Sub
+
+
+'======================================================================================
+' Bo dau tieng Viet + chuyen ve chu thuong, dung de so sanh tieu de khong phu thuoc dau.
+' Dung ma Unicode dang SO (ChrW) thay vi go ky tu co dau truc tiep trong code, de file
+' nay hoan toan la ASCII thuan, tranh loi vo dau/font khi copy-paste vao VBA Editor.
+'======================================================================================
+Private Function BoDauTiengViet(ByVal s As String) As String
+    Dim result As String
+    result = LCase$(s)
+
+    Dim maSo() As Variant
+    Dim kyTuGoc() As Variant
+
+    maSo = Array(225, 224, 7843, 227, 7841, 259, 7855, 7857, 7859, 7861, 7863, _
+                 226, 7845, 7847, 7849, 7851, 7853, _
+                 233, 232, 7867, 7869, 7865, 234, 7871, 7873, 7875, 7877, 7879, _
+                 237, 236, 7881, 297, 7883, _
+                 243, 242, 7887, 245, 7885, 244, 7889, 7891, 7893, 7895, 7897, _
+                 417, 7899, 7901, 7903, 7905, 7907, _
+                 250, 249, 7911, 361, 7909, 432, 7913, 7915, 7917, 7919, 7921, _
+                 253, 7923, 7927, 7929, 7925, _
+                 273)
+
+    kyTuGoc = Array("a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", _
+                     "a", "a", "a", "a", "a", "a", _
+                     "e", "e", "e", "e", "e", "e", "e", "e", "e", "e", "e", _
+                     "i", "i", "i", "i", "i", _
+                     "o", "o", "o", "o", "o", "o", "o", "o", "o", "o", "o", _
+                     "o", "o", "o", "o", "o", "o", _
+                     "u", "u", "u", "u", "u", "u", "u", "u", "u", "u", "u", _
+                     "y", "y", "y", "y", "y", _
+                     "d")
+
+    Dim i As Long
+    For i = LBound(maSo) To UBound(maSo)
+        If InStr(result, ChrW(maSo(i))) > 0 Then
+            result = Replace(result, ChrW(maSo(i)), kyTuGoc(i))
+        End If
+    Next i
+
+    BoDauTiengViet = result
+End Function
+
+
+'======================================================================================
+' Tim so thu tu cot theo ten tieu de - so sanh sau khi BO DAU + ve chu thuong nen tieu
+' de tren SharePointData co dau ("Ton MB52" (co dau)) hay khong dau ("Ton MB52") deu khop duoc.
+'======================================================================================
+Private Function TimCot(ByVal ws As Worksheet, ByVal headerRow As Long, ByVal tenCot As String) As Long
+    Dim lastC As Long, c As Long
+    Dim tieuDeThucTe As String, tieuDeCanTim As String
+
+    lastC = ws.Cells(headerRow, ws.Columns.Count).End(xlToLeft).Column
+    tieuDeCanTim = BoDauTiengViet(tenCot)
+
+    For c = 1 To lastC
+        tieuDeThucTe = BoDauTiengViet(Trim(CStr(ws.Cells(headerRow, c).Value)))
+        If tieuDeThucTe = tieuDeCanTim Then
+            TimCot = c
+            Exit Function
+        End If
+    Next c
+
+    Err.Raise vbObjectError + 1, "TimCot", _
+        "Khong tim thay tieu de '" & tenCot & "' o hang " & headerRow & " trong sheet '" & ws.Name & "'."
+End Function
+
+
+'======================================================================================
+' Doc 1 cot thanh mang 2 chieu (n,1). Xu ly ca truong hop chi co 1 dong
+' (vi Range.Value2 cua 1 o tra ve gia tri don, khong phai mang)
+'======================================================================================
+Private Function ReadColumnArray(ByVal ws As Worksheet, ByVal col As Long, _
+                                  ByVal startRow As Long, ByVal endRow As Long) As Variant
+    Dim n As Long: n = endRow - startRow + 1
+    Dim result() As Variant
+    ReDim result(1 To n, 1 To 1)
+
+    If n = 1 Then
+        result(1, 1) = ws.Cells(startRow, col).Value2
+    Else
+        result = ws.Range(ws.Cells(startRow, col), ws.Cells(endRow, col)).Value2
+    End If
+    ReadColumnArray = result
+End Function
+
+
+'======================================================================================
+' Doc SharePointData (tu hang 3) -> Dictionary(Material -> Array(TenMaterial, GiaTri))
+' GiaTri = Sum Real Stock - Ton MB52
+' Doc gop 1 lan (1 Range) cho ca 4 cot de giam toi da so lan truy cap worksheet
+'======================================================================================
+Private Function ReadSharePointData(ByVal wsSP As Worksheet) As Object
+
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    Dim colPN As Long, colName As Long, colReal As Long, colMB52 As Long
+    Dim lastRowSP As Long
+
+    colPN = TimCot(wsSP, HEADER_ROW_SP, HEADER_PNUMBER)
+    colName = TimCot(wsSP, HEADER_ROW_SP, HEADER_PARTNAME)
+    colReal = TimCot(wsSP, HEADER_ROW_SP, HEADER_REALSTOCK)
+    colMB52 = TimCot(wsSP, HEADER_ROW_SP, HEADER_MB52)
+
+    lastRowSP = wsSP.Cells(wsSP.Rows.Count, colPN).End(xlUp).Row
+    If lastRowSP <= HEADER_ROW_SP Then
+        Set ReadSharePointData = dict   ' khong co du lieu
+        Exit Function
+    End If
+
+    ' Doc gop ca vung bao 4 cot can dung trong 1 lan (nhanh hon nhieu so voi doc tung cot)
+    Dim firstCol As Long, lastCol As Long
+    firstCol = WorksheetFunction.Min(colPN, colName, colReal, colMB52)
+    lastCol = WorksheetFunction.Max(colPN, colName, colReal, colMB52)
+
+    Dim block As Variant
+    block = wsSP.Range(wsSP.Cells(HEADER_ROW_SP + 1, firstCol), _
+                        wsSP.Cells(lastRowSP, lastCol)).Value2
+
+    Dim offPN As Long, offName As Long, offReal As Long, offMB52 As Long
+    offPN = colPN - firstCol + 1
+    offName = colName - firstCol + 1
+    offReal = colReal - firstCol + 1
+    offMB52 = colMB52 - firstCol + 1
+
+    Dim i As Long, matKey As String, giaTri As Double
+    Dim v1 As Variant, v2 As Variant
+
+    For i = 1 To UBound(block, 1)
+        matKey = Trim(CStr(block(i, offPN)))
+        If matKey <> "" Then
+            v1 = block(i, offReal)
+            v2 = block(i, offMB52)
+            giaTri = IIf(IsNumeric(v1), CDbl(v1), 0#) - IIf(IsNumeric(v2), CDbl(v2), 0#)
+            ' Neu trung ma Material, dong xuat hien SAU se ghi de dong truoc
+            dict(matKey) = Array(CStr(block(i, offName)), giaTri)
+        End If
+    Next i
+
+    Set ReadSharePointData = dict
+End Function
+
+
+'======================================================================================
+' Tra ve cot lich su de ghi du lieu:
+'  - Neu cot lich su cuoi cung (ben phai nhat) co tieu de = ngay hom nay -> GHI DE cot do
+'    (xoa trang du lieu cu truoc khi ghi lai)
+'  - Nguoc lai -> tao cot moi, ghi tieu de = ngay hom nay (dinh dang dd-mmm)
+' isNewCol (ByRef) = True neu vua tao cot moi, False neu ghi de cot co san
+'======================================================================================
+Private Function GetOrCreateHistoryColumn(ByVal wsHist As Worksheet, ByVal lastRow As Long, _
+                                           ByRef isNewCol As Boolean) As Long
+
+    Dim lastCol As Long, todayStr As String
+    lastCol = wsHist.Cells(HEADER_ROW_HIST, wsHist.Columns.Count).End(xlToLeft).Column
+    If lastCol < COL_NAME Then lastCol = COL_NAME
+
+    todayStr = Format(Date, "dd-mmm")
+
+    If lastCol >= FIRST_HIST_COL Then
+        If Trim(CStr(wsHist.Cells(HEADER_ROW_HIST, lastCol).Value)) = todayStr Then
+            If lastRow > HEADER_ROW_HIST Then
+                wsHist.Range(wsHist.Cells(HEADER_ROW_HIST + 1, lastCol), _
+                              wsHist.Cells(lastRow, lastCol)).ClearContents
+            End If
+            isNewCol = False
+            GetOrCreateHistoryColumn = lastCol
+            Exit Function
+        End If
+    End If
+
+    Dim newColIdx As Long
+    newColIdx = lastCol + 1
+    wsHist.Cells(HEADER_ROW_HIST, newColIdx).NumberFormat = "@"   ' text, khong phu thuoc locale
+    wsHist.Cells(HEADER_ROW_HIST, newColIdx).Value = todayStr
+    isNewCol = True
+    GetOrCreateHistoryColumn = newColIdx
+End Function
+
+
+'======================================================================================
+' Ghi du lieu vao BOM_History (tu hang 2):
+'  - Material da co -> cap nhat Material Name (neu doi) + ghi gia tri vao cot lich su
+'  - Material chua co -> them dong moi o cuoi
+'  - KHONG xoa Material cu du khong con xuat hien trong SharePointData
+'======================================================================================
+Private Sub WriteHistoryColumn(ByVal wsHist As Worksheet, ByVal spDict As Object, _
+                                ByVal targetCol As Long, ByVal lastRow As Long)
+
+    Dim n As Long: n = lastRow - HEADER_ROW_HIST
+    Dim i As Long, key As String
+
+    Dim dictRow As Object: Set dictRow = CreateObject("Scripting.Dictionary")
+    Dim arrMatExisting As Variant, nameArrOut As Variant, colArrOut As Variant
+
+    If n > 0 Then
+        arrMatExisting = ReadColumnArray(wsHist, COL_MAT, HEADER_ROW_HIST + 1, lastRow)
+        nameArrOut = ReadColumnArray(wsHist, COL_NAME, HEADER_ROW_HIST + 1, lastRow)
+        ReDim colArrOut(1 To n, 1 To 1)
+
+        For i = 1 To n
+            key = Trim(CStr(arrMatExisting(i, 1)))
+            If key <> "" And Not dictRow.Exists(key) Then dictRow.Add key, i
+        Next i
+    End If
+
+    ' Phan loai du lieu SharePoint: cap nhat dong cu / gom dong moi
+    Dim newKeys As Collection, newNames As Collection, newVals As Collection
+    Set newKeys = New Collection: Set newNames = New Collection: Set newVals = New Collection
+
+    Dim k As Variant, itm As Variant, matName As String, matVal As Double, r As Long
+
+    For Each k In spDict.Keys
+        itm = spDict(k)
+        matName = itm(0)
+        matVal = itm(1)
+
+        If n > 0 And dictRow.Exists(CStr(k)) Then
+            r = dictRow(CStr(k))
+            colArrOut(r, 1) = matVal
+            If Trim(CStr(nameArrOut(r, 1))) <> Trim(matName) Then nameArrOut(r, 1) = matName
+        Else
+            newKeys.Add CStr(k): newNames.Add matName: newVals.Add matVal
+        End If
+    Next k
+
+    ' Ghi lai cot Ten + cot lich su cho cac dong hien co (1 lan ghi cho moi cot)
+    If n > 0 Then
+        wsHist.Range(wsHist.Cells(HEADER_ROW_HIST + 1, COL_NAME), _
+                      wsHist.Cells(lastRow, COL_NAME)).Value = nameArrOut
+        wsHist.Range(wsHist.Cells(HEADER_ROW_HIST + 1, targetCol), _
+                      wsHist.Cells(lastRow, targetCol)).Value = colArrOut
+    End If
+
+    ' Them Material moi (neu co) vao cuoi, ghi 1 lan cho moi cot
+    If newKeys.Count > 0 Then
+        Dim m As Long: m = newKeys.Count
+        Dim arrNewMat() As Variant, arrNewName() As Variant, arrNewVal() As Variant
+        ReDim arrNewMat(1 To m, 1 To 1): ReDim arrNewName(1 To m, 1 To 1): ReDim arrNewVal(1 To m, 1 To 1)
+
+        For i = 1 To m
+            arrNewMat(i, 1) = newKeys(i)
+            arrNewName(i, 1) = newNames(i)
+            arrNewVal(i, 1) = newVals(i)
+        Next i
+
+        Dim startRow As Long: startRow = lastRow + 1
+        wsHist.Range(wsHist.Cells(startRow, COL_MAT), _
+                      wsHist.Cells(startRow + m - 1, COL_MAT)).Value = arrNewMat
+        wsHist.Range(wsHist.Cells(startRow, COL_NAME), _
+                      wsHist.Cells(startRow + m - 1, COL_NAME)).Value = arrNewName
+        wsHist.Range(wsHist.Cells(startRow, targetCol), _
+                      wsHist.Cells(startRow + m - 1, targetCol)).Value = arrNewVal
+    End If
+
+End Sub
+
+
+'======================================================================================
+' So sanh cot lich su targetCol voi cot lien truoc (targetCol - 1).
+' Tra ve True neu TOAN BO gia tri giong het nhau (chi so gia tri, khong so tieu de ngay)
+'======================================================================================
+Private Function IsIdenticalToPreviousColumn(ByVal wsHist As Worksheet, ByVal targetCol As Long) As Boolean
+
+    Dim prevCol As Long: prevCol = targetCol - 1
+    If prevCol < FIRST_HIST_COL Then
+        IsIdenticalToPreviousColumn = False   ' chua co cot nao truoc do de so sanh
+        Exit Function
+    End If
+
+    Dim lastRow As Long
+    lastRow = wsHist.Cells(wsHist.Rows.Count, COL_MAT).End(xlUp).Row
+    If lastRow <= HEADER_ROW_HIST Then
+        IsIdenticalToPreviousColumn = False
+        Exit Function
+    End If
+
+    Dim arrNew As Variant, arrPrev As Variant
+    arrNew = ReadColumnArray(wsHist, targetCol, HEADER_ROW_HIST + 1, lastRow)
+    arrPrev = ReadColumnArray(wsHist, prevCol, HEADER_ROW_HIST + 1, lastRow)
+
+    Dim i As Long
+    For i = 1 To UBound(arrNew, 1)
+        If Not ValuesEqual(arrNew(i, 1), arrPrev(i, 1)) Then
+            IsIdenticalToPreviousColumn = False
+            Exit Function
+        End If
+    Next i
+    IsIdenticalToPreviousColumn = True
+End Function
+
+
+'======================================================================================
+' So sanh 2 gia tri (dung sai nho cho so thuc de tranh loi lam tron dau phay dong)
+'======================================================================================
+Private Function ValuesEqual(ByVal v1 As Variant, ByVal v2 As Variant) As Boolean
+    Const EPS As Double = 0.0000001
+    Dim s1 As String, s2 As String
+    s1 = Trim(CStr(v1)): s2 = Trim(CStr(v2))
+
+    If s1 = "" And s2 = "" Then
+        ValuesEqual = True
+    ElseIf IsNumeric(v1) And IsNumeric(v2) Then
+        ValuesEqual = (Abs(CDbl(v1) - CDbl(v2)) < EPS)
+    Else
+        ValuesEqual = (s1 = s2)
+    End If
+End Function
