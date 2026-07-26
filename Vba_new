@@ -1,0 +1,29 @@
+Option Explicit
+
+'======================================================================================
+' MODULE: modBOMHistory
+' MUC DICH: Doc SharePointData, tinh gia tri ton kho, luu lich su theo ngay vao BOM_History
+' CACH DUNG: Copy toan bo noi dung nay vao 1 Module chuan (Alt+F11 > Insert > Module),
+'            sau do goi SaveBOMHistory tu cho ban dang xu ly refresh SharePoint xong.
+' LUU Y VE DAU TIENG VIET: toan bo code va comment trong file nay deu la ky tu ASCII
+' thuan (khong dau) de tranh loi vo font/ma hoa khi dan vao VBA Editor. Rieng tieu de
+' cot tren sheet SharePointData ("Ton MB52" (co dau)) van co the co dau binh thuong - ham
+' BoDauTiengViet ben duoi se tu dong bo dau truoc khi so sanh nen khong can go dau
+' trong code.
+'======================================================================================
+
+'--------------------------------------------------------------------------------------
+' CAU HINH - CHI CAN SUA O DAY NEU CAU TRUC FILE THAY DOI
+'--------------------------------------------------------------------------------------
+Private Const SHEET_SP         As String = "SharePointData"
+Private Const SHEET_HIST       As String = "BOM_History"
+
+Private Const HEADER_ROW_SP    As Long = 2     ' Hang tieu de SharePointData (data tu hang 3)
+Private Const HEADER_ROW_HIST  As Long = 1     ' Hang tieu de BOM_History (data tu hang 2)
+
+Private Const COL_MAT          As Long = 1     ' Cot A = Material
+Private Const COL_NAME         As Long = 2     ' Cot B = Material Name
+Private Const FIRST_HIST_COL   As Long = 3     ' Cot C = cot lich su dau tien
+
+' Ten tieu de can tim tren SharePointData - GO KHONG DAU, ham TimCot se tu bo dau
+' cua tieu de
