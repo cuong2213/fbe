@@ -34,12 +34,14 @@ Public Sub CheckBOM()
     Set gCache = Nothing
     On Error GoTo Fin
     Set wbN = Workbooks.Open(pNew, UpdateLinks:=0, ReadOnly:=True)
-    Set wsN = wbN.Worksheets(1)
+    Set wsN = PickSheet(wbN)
+    If wsN Is Nothing Then GoTo Fin
 
     rSup = FindMarker(wsN, "super bom")
+    If rSup = 0 Then rSup = FindMarker(wsN, "supper bom")   ' phong truong hop go sai chinh ta
     rSin = FindMarker(wsN, "single bom")
     If rSup = 0 And rSin = 0 Then
-        MsgBox "Khong thay 'Super BOM' hoac 'Single BOM' (cot A:C) trong file moi.", vbExclamation
+        MsgBox "Khong thay chu 'Super BOM' hoac 'Single BOM' trong file moi.", vbExclamation
         GoTo Fin
     End If
 
@@ -438,9 +440,32 @@ Private Function HasDup(ByVal s As String) As Boolean
     Next i
 End Function
 
+' Chon sheet cua file moi: nhap so thu tu hoac ten sheet (mac dinh = sheet dang active cua file)
+Private Function PickSheet(wb As Workbook) As Worksheet
+    Dim i As Long, lst As String, s As String
+    If wb.Worksheets.Count = 1 Then Set PickSheet = wb.Worksheets(1): Exit Function
+    For i = 1 To wb.Worksheets.Count
+        lst = lst & i & ". " & wb.Worksheets(i).Name & vbLf
+    Next i
+    Do
+        s = Trim(InputBox("Chon sheet cua FILE MOI (nhap so hoac ten):" & vbLf & vbLf & lst, "Chon sheet", _
+                          CStr(wb.ActiveSheet.Index)))
+        If Len(s) = 0 Then Exit Function                       ' Cancel
+        If IsNumeric(s) Then
+            If CLng(s) >= 1 And CLng(s) <= wb.Worksheets.Count Then Set PickSheet = wb.Worksheets(CLng(s)): Exit Function
+        Else
+            On Error Resume Next
+            Set PickSheet = wb.Worksheets(s)
+            On Error GoTo 0
+            If Not PickSheet Is Nothing Then Exit Function
+        End If
+        MsgBox "Khong tim thay sheet '" & s & "', nhap lai.", vbExclamation
+    Loop
+End Function
+
 Private Function FindMarker(ws As Worksheet, txt As String) As Long
     Dim f As Range
-    Set f = ws.Range("A:C").Find(What:=txt, LookIn:=xlValues, LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False)
+    Set f = ws.Cells.Find(What:=txt, LookIn:=xlValues, LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False)
     If Not f Is Nothing Then FindMarker = f.Row
 End Function
 
