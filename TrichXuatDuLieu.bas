@@ -218,7 +218,7 @@ Private Sub ProcessSheet(ws As Worksheet)
     Dim ur As Range, v As Variant
     Dim r0 As Long, c0 As Long, nR As Long, nC As Long
     Dim r As Long, c As Long, x As Variant, mi As Long
-    Dim titles As Collection, titleRows As Object, tt As Variant
+    Dim titles As Collection, tabs As Collection, tt As Variant, t2 As Variant, cEnd As Long
 
     Set ur = ws.UsedRange
     If ur.Cells.CountLarge < 2 Then Exit Sub
@@ -227,7 +227,6 @@ Private Sub ProcessSheet(ws As Worksheet)
     nR = UBound(v, 1): nC = UBound(v, 2)
 
     Set titles = New Collection
-    Set titleRows = CreateObject("Scripting.Dictionary")
     For r = 1 To nR
         For c = 1 To nC
             x = v(r, c)
@@ -236,30 +235,40 @@ Private Sub ProcessSheet(ws As Worksheet)
                     mi = FindModel(Norm(CStr(x)))
                     If mi <> 0 Then
                         titles.Add Array(r, c, mi, CStr(x))
-                        If Not titleRows.Exists(r) Then titleRows.Add r, True
                     End If
                 End If
             End If
         Next c
     Next r
 
+    'Moi bang chiem cac cot tu o tieu de den truoc o tieu de ke ben (cung hang)
+    Set tabs = New Collection
     For Each tt In titles
-        ProcessTable ws, v, r0, c0, nR, nC, tt, titleRows
+        cEnd = nC
+        For Each t2 In titles
+            If t2(0) = tt(0) And t2(1) > tt(1) And t2(1) - 1 < cEnd Then cEnd = t2(1) - 1
+        Next t2
+        tabs.Add Array(tt(0), tt(1), tt(2), tt(3), cEnd)
+    Next tt
+
+    For Each tt In tabs
+        ProcessTable ws, v, r0, c0, nR, nC, tt, tabs
     Next tt
 End Sub
 
 Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal c0 As Long, _
-                         ByVal nR As Long, ByVal nC As Long, tt As Variant, titleRows As Object)
+                         ByVal nR As Long, ByVal nC As Long, tt As Variant, tabs As Collection)
     Dim tr As Long, tc As Long, mi As Long, titleText As String, addr As String
     Dim tn As String, modelName As String, partO As String, colorO As String
     Dim pi As Long, ci As Long, dVal As Double, dState As Long, dOut As Variant
     Dim hr As Long, c As Long, h As String, missing As String, dupHdr As String
-    Dim cP As Long, cN1 As Long, cN3 As Long
+    Dim cP As Long, cN1 As Long, cN3 As Long, cS As Long, cE As Long
     Dim rr As Long, pv As Variant, n1 As Variant, n3 As Variant, n1v As Variant, n3v As Variant
     Dim prefix As String, mk As String, mp As Variant, rowAddr As String
     Dim nAdd As Long, nErr As Long, bad As Boolean
 
     tr = tt(0): tc = tt(1): mi = tt(2): titleText = tt(3)
+    cS = tc: cE = tt(4)
     addr = ws.Cells(r0 + tr - 1, c0 + tc - 1).Address(False, False)
     mTables = mTables + 1
 
@@ -307,7 +316,7 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
         AddLog ws.Name, addr, titleText, modelName, partO, colorO, "LOI", "Tieu de cot", "Khong co hang tieu de cot duoi tieu de bang"
         mErr = mErr + 1: Exit Sub
     End If
-    For c = 1 To nC
+    For c = cS To cE
         If Not IsError(v(hr, c)) Then
             h = Norm(CStr(v(hr, c)))
             Select Case h
@@ -331,8 +340,8 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
 
     'Doc du lieu
     For rr = hr + 1 To nR
-        If titleRows.Exists(rr) Then Exit For
-        If RowBlank(v, rr, nC) Then Exit For
+        If TitleInBand(tabs, rr, cS, cE) Then Exit For
+        If RowBlank(v, rr, cS, cE) Then Exit For
         pv = v(rr, cP): n1 = v(rr, cN1): n3 = v(rr, cN3)
         If IsBlank(pv) And IsBlank(n1) And IsBlank(n3) Then GoTo NextRow
         rowAddr = ws.Cells(r0 + rr - 1, c0 + cP - 1).Address(False, False)
@@ -436,16 +445,21 @@ Private Sub ClearOldData(wsD As Worksheet)
 End Sub
 
 Private Sub WriteLog(wbDest As Workbook)
-    Dim wsL As Worksheet, n As Long, i As Long, k As Long, a() As Variant, it As Variant, r As Long
+    Dim wsL As Worksheet, n As Long, i As Long, k As Long, a() As Variant, it As Variant, r As Long, lastOld As Long
     n = mLog.Count
-    If n = 0 Then Exit Sub
     On Error Resume Next
     Set wsL = wbDest.Worksheets(SH_LOG)
     On Error GoTo 0
     If wsL Is Nothing Then
+        If n = 0 Then Exit Sub
         Set wsL = wbDest.Worksheets.Add(After:=wbDest.Worksheets(wbDest.Worksheets.Count))
         wsL.Name = SH_LOG
     End If
+
+    'Xoa log cu (giu hang tieu de), moi lan chay chi con log cua lan chay hien tai
+    lastOld = wsL.UsedRange.Row + wsL.UsedRange.Rows.Count - 1
+    If lastOld >= 2 Then wsL.Rows("2:" & lastOld).ClearContents
+    If n = 0 Then Exit Sub
     If Len(CStr(wsL.Cells(1, 1).Value2)) = 0 Then
         wsL.Range("A1:K1").Value2 = Array("Thoi gian", "File nguon", "Sheet nguon", "O tieu de", "Noi dung tieu de", _
             "Model", "Part name", "Exterior Color", "Trang thai", "Truong thieu/khong khop", "Chi tiet")
@@ -511,9 +525,16 @@ Private Function IsBlank(x As Variant) As Boolean
     If VarType(x) = vbString Then IsBlank = (Len(Trim$(CStr(x))) = 0)
 End Function
 
-Private Function RowBlank(v As Variant, ByVal r As Long, ByVal nC As Long) As Boolean
+Private Function TitleInBand(tabs As Collection, ByVal r As Long, ByVal cS As Long, ByVal cE As Long) As Boolean
+    Dim t As Variant
+    For Each t In tabs
+        If t(0) = r And t(1) >= cS And t(1) <= cE Then TitleInBand = True: Exit Function
+    Next t
+End Function
+
+Private Function RowBlank(v As Variant, ByVal r As Long, ByVal cS As Long, ByVal cE As Long) As Boolean
     Dim c As Long, x As Variant
-    For c = 1 To nC
+    For c = cS To cE
         x = v(r, c)
         If IsError(x) Then Exit Function
         If Not IsEmpty(x) Then
