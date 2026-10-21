@@ -8,6 +8,7 @@ Option Explicit
 '   F        : cot trong ngan cach
 '   G..J     : bang mapping  G = "Model_Part name" | H = Point | I = Row | J = Col
 ' Body Type = ten Model (lay tu hang 1 cua MODEL). MNV va MINIVAN duoc coi la 1.
+' Moi lan chay: XOA het data cu o DATA roi ghi lai tu dau, KHONG loc trung.
 ' File nay chi dung ky tu ASCII de import vao VBE khong bi loi font.
 '==============================================================================
 
@@ -38,12 +39,11 @@ Private mColorsO() As String
 Private mColorsN() As String
 Private mNColors As Long
 Private mMap As Object        'key = "MODEL PART|POINT" -> Array(Row, Col) hoac "DUP"
-Private mKeys As Object       'khoa chong trung
 Private mOut As Collection    'ket qua cho DATA
 Private mLog As Collection
 Private mSrcName As String
 Private mRx As Object
-Private mTables As Long, mAdded As Long, mDup As Long, mErr As Long
+Private mTables As Long, mAdded As Long, mErr As Long
 
 '==============================================================================
 Public Sub TrichXuatDuLieu()
@@ -80,12 +80,11 @@ Public Sub TrichXuatDuLieu()
 
     Set mLog = New Collection
     Set mOut = New Collection
-    Set mKeys = CreateObject("Scripting.Dictionary")
     Set mMap = CreateObject("Scripting.Dictionary")
     Set mRx = CreateObject("VBScript.RegExp")
     mRx.Pattern = "(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})"
     mRx.Global = False
-    mTables = 0: mAdded = 0: mDup = 0: mErr = 0
+    mTables = 0: mAdded = 0: mErr = 0
 
     'File nguon: dung lai neu da mo, neu chua thi tu mo (chi doc)
     For Each wb In Application.Workbooks
@@ -98,7 +97,6 @@ Public Sub TrichXuatDuLieu()
     mSrcName = wbSrc.Name
 
     If Not LoadModel(wsM) Then GoTo Cleanup
-    LoadExisting wsD
 
     For Each ws In wbSrc.Worksheets
         ProcessSheet ws
@@ -115,8 +113,8 @@ Cleanup:
     If Len(errMsg) > 0 Then
         MsgBox "Dung do loi, DATA chua duoc ghi. Xem sheet LOG." & vbLf & errMsg, vbCritical
     Else
-        MsgBox "Xong." & vbLf & "Bang xu ly: " & mTables & vbLf & "Dong them vao DATA: " & mAdded & _
-               vbLf & "Dong trung bo qua: " & mDup & vbLf & "Dong/bang loi: " & mErr & _
+        MsgBox "Xong." & vbLf & "Bang xu ly: " & mTables & vbLf & "Dong ghi vao DATA: " & mAdded & _
+               vbLf & "Dong/bang loi: " & mErr & _
                vbLf & "Chi tiet xem sheet LOG.", vbInformation
     End If
     Exit Sub
@@ -213,19 +211,6 @@ Private Function LoadModel(wsM As Worksheet) As Boolean
     LoadModel = True
 End Function
 
-'Nap khoa chong trung tu DATA hien co
-Private Sub LoadExisting(wsD As Worksheet)
-    Dim lastR As Long, v As Variant, i As Long, key As String
-    lastR = LastDataRow(wsD)
-    If lastR < DATA_FIRST_ROW Then Exit Sub
-    v = wsD.Range(wsD.Cells(DATA_FIRST_ROW, 1), wsD.Cells(lastR, 12)).Value2
-    For i = 1 To UBound(v, 1)
-        key = DateKey(v(i, 2)) & "|" & NormV(v(i, 6)) & "|" & NormV(v(i, 5)) & "|" & _
-              NormV(v(i, 7)) & "|" & PointKey(v(i, 8))
-        If Not mKeys.Exists(key) Then mKeys.Add key, True
-    Next i
-End Sub
-
 '==============================================================================
 ' QUET MOT SHEET NGUON
 '==============================================================================
@@ -267,12 +252,12 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
                          ByVal nR As Long, ByVal nC As Long, tt As Variant, titleRows As Object)
     Dim tr As Long, tc As Long, mi As Long, titleText As String, addr As String
     Dim tn As String, modelName As String, partO As String, colorO As String
-    Dim pi As Long, ci As Long, dVal As Double, dState As Long, dKey As String, dOut As Variant
+    Dim pi As Long, ci As Long, dVal As Double, dState As Long, dOut As Variant
     Dim hr As Long, c As Long, h As String, missing As String, dupHdr As String
     Dim cP As Long, cN1 As Long, cN3 As Long
     Dim rr As Long, pv As Variant, n1 As Variant, n3 As Variant, n1v As Variant, n3v As Variant
-    Dim prefix As String, key As String, mk As String, mp As Variant, rowAddr As String
-    Dim nAdd As Long, nDup As Long, nErr As Long, bad As Boolean
+    Dim prefix As String, mk As String, mp As Variant, rowAddr As String
+    Dim nAdd As Long, nErr As Long, bad As Boolean
 
     tr = tt(0): tc = tt(1): mi = tt(2): titleText = tt(3)
     addr = ws.Cells(r0 + tr - 1, c0 + tc - 1).Address(False, False)
@@ -310,9 +295,9 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
     'Ngay
     dState = ParseDate(titleText, dVal)
     If dState = 1 Then
-        dOut = dVal: dKey = CStr(CLng(dVal))
+        dOut = dVal
     Else
-        dOut = Empty: dKey = ""
+        dOut = Empty
         If dState = 2 Then AddLog ws.Name, addr, titleText, modelName, partO, colorO, "CANH BAO", "Ngay", "Ngay trong tieu de khong hop le, de trong"
     End If
 
@@ -385,19 +370,14 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
             nErr = nErr + 1: GoTo NextRow
         End If
 
-        key = dKey & "|" & Norm(modelName) & "|" & Norm(partO) & "|" & Norm(colorO) & "|" & PointKey(pv)
-        If mKeys.Exists(key) Then
-            nDup = nDup + 1: GoTo NextRow
-        End If
-        mKeys.Add key, True
         mOut.Add Array(dOut, partO, modelName, colorO, pv, n1v, n3v, mp(0), mp(1))
         nAdd = nAdd + 1
 NextRow:
     Next rr
 
-    mAdded = mAdded + nAdd: mDup = mDup + nDup: mErr = mErr + nErr
+    mAdded = mAdded + nAdd: mErr = mErr + nErr
     AddLog ws.Name, addr, titleText, modelName, partO, colorO, IIf(nErr > 0, "CO LOI DONG", "OK"), "", _
-           "Them " & nAdd & " dong; trung bo qua " & nDup & "; loi " & nErr
+           "Them " & nAdd & " dong; loi " & nErr
 End Sub
 
 '==============================================================================
@@ -405,38 +385,54 @@ End Sub
 '==============================================================================
 Private Sub WriteData(wsD As Worksheet)
     Dim n As Long, i As Long, k As Long, it As Variant
-    Dim lastR As Long, firstNew As Long, lastNew As Long, stt0 As Double
+    Dim lastNew As Long
     Dim a1() As Variant, a2() As Variant
 
     n = mOut.Count
-    If n = 0 Then Exit Sub
-    lastR = LastDataRow(wsD)
-    firstNew = IIf(lastR < DATA_FIRST_ROW, DATA_FIRST_ROW, lastR + 1)
-    lastNew = firstNew + n - 1
-    If lastR >= DATA_FIRST_ROW Then
-        stt0 = Application.WorksheetFunction.Max(wsD.Range(wsD.Cells(DATA_FIRST_ROW, 1), wsD.Cells(lastR, 1)))
-    End If
+    If n = 0 Then Exit Sub          'khong co gi de ghi -> giu nguyen data cu
+
+    ClearOldData wsD
+
+    lastNew = DATA_FIRST_ROW + n - 1
 
     ReDim a1(1 To n, 1 To 2)     'A:B
     ReDim a2(1 To n, 1 To 8)     'E:L
     For i = 1 To n
         it = mOut(i)
-        a1(i, 1) = stt0 + i
+        a1(i, 1) = i             'STT tinh lai tu 1
         a1(i, 2) = it(0)
         For k = 1 To 8
             a2(i, k) = it(k)
         Next k
     Next i
 
-    wsD.Range(wsD.Cells(firstNew, 2), wsD.Cells(lastNew, 2)).NumberFormat = COL_DATE_FMT
-    wsD.Range(wsD.Cells(firstNew, 1), wsD.Cells(lastNew, 2)).Value2 = a1
-    wsD.Range(wsD.Cells(firstNew, 5), wsD.Cells(lastNew, 12)).Value2 = a2
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 2), wsD.Cells(lastNew, 2)).NumberFormat = COL_DATE_FMT
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 1), wsD.Cells(lastNew, 2)).Value2 = a1
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 5), wsD.Cells(lastNew, 12)).Value2 = a2
 
-    'Cot C (Shift) bo qua. Cot D (Week) tinh tu cot B, khong ghi de neu da co cong thuc.
-    If Not wsD.Cells(firstNew, 4).HasFormula Then
-        wsD.Range(wsD.Cells(firstNew, 4), wsD.Cells(lastNew, 4)).Formula = _
-            "=IF(B" & firstNew & "="""",""""," & WEEK_FORMULA & "(B" & firstNew & "))"
-    End If
+    'Cot C (Shift) bo qua. Cot D (Week) tinh tu cot B.
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 4), wsD.Cells(lastNew, 4)).Formula = _
+        "=IF(B" & DATA_FIRST_ROW & "="""",""""," & WEEK_FORMULA & "(B" & DATA_FIRST_ROW & "))"
+End Sub
+
+'Xoa noi dung cu o DATA (giu dinh dang, tieu de hang 1)
+Private Sub ClearOldData(wsD As Worksheet)
+    Dim lastR As Long, c As Long, r As Long
+    lastR = DATA_FIRST_ROW
+    For c = 1 To 12
+        r = wsD.Cells(wsD.Rows.Count, c).End(xlUp).Row
+        If r > lastR Then lastR = r
+    Next c
+    If lastR < DATA_FIRST_ROW Then Exit Sub
+
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 1), wsD.Cells(lastR, 2)).ClearContents    'A:B
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 4), wsD.Cells(lastR, 4)).ClearContents    'D (Week, ghi lai sau)
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 5), wsD.Cells(lastR, 12)).ClearContents   'E:L
+
+    'Cot C (Shift): chi xoa gia tri go tay, giu lai cong thuc neu co
+    On Error Resume Next
+    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 3), wsD.Cells(lastR, 3)).SpecialCells(xlCellTypeConstants).ClearContents
+    On Error GoTo 0
 End Sub
 
 Private Sub WriteLog(wbDest As Workbook)
@@ -507,13 +503,6 @@ End Function
 
 Private Function PointKey(x As Variant) As String
     PointKey = NormV(x)
-End Function
-
-Private Function DateKey(x As Variant) As String
-    If IsError(x) Then Exit Function
-    If IsEmpty(x) Then Exit Function
-    If VarType(x) = vbString Then Exit Function
-    If IsNumeric(x) Then DateKey = CStr(CLng(x))
 End Function
 
 Private Function IsBlank(x As Variant) As Boolean
