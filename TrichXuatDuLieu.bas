@@ -445,36 +445,42 @@ Private Sub ClearOldData(wsD As Worksheet)
 End Sub
 
 Private Sub WriteLog(wbDest As Workbook)
-    Dim wsL As Worksheet, n As Long, i As Long, k As Long, a() As Variant, it As Variant, r As Long, lastOld As Long
+    Dim wsL As Worksheet, n As Long, i As Long, k As Long, a() As Variant, it As Variant
+    Dim t As String
+
     n = mLog.Count
     On Error Resume Next
     Set wsL = wbDest.Worksheets(SH_LOG)
-    On Error GoTo 0
+    On Error GoTo LogErr
     If wsL Is Nothing Then
         If n = 0 Then Exit Sub
         Set wsL = wbDest.Worksheets.Add(After:=wbDest.Worksheets(wbDest.Worksheets.Count))
         wsL.Name = SH_LOG
     End If
 
-    'Xoa log cu (giu hang tieu de), moi lan chay chi con log cua lan chay hien tai
-    lastOld = wsL.UsedRange.Row + wsL.UsedRange.Rows.Count - 1
-    If lastOld >= 2 Then wsL.Rows("2:" & lastOld).ClearContents
+    'Xoa sach sheet LOG (noi dung + dinh dang), moi lan chay ghi lai tu dau
+    wsL.Cells.Clear
+
+    wsL.Range("A1:K1").Value2 = Array("Thoi gian", "File nguon", "Sheet nguon", "O tieu de", "Noi dung tieu de", _
+        "Model", "Part name", "Exterior Color", "Trang thai", "Truong thieu/khong khop", "Chi tiet")
+    wsL.Range("A1:K1").Font.Bold = True
     If n = 0 Then Exit Sub
-    If Len(CStr(wsL.Cells(1, 1).Value2)) = 0 Then
-        wsL.Range("A1:K1").Value2 = Array("Thoi gian", "File nguon", "Sheet nguon", "O tieu de", "Noi dung tieu de", _
-            "Model", "Part name", "Exterior Color", "Trang thai", "Truong thieu/khong khop", "Chi tiet")
-        wsL.Range("A1:K1").Font.Bold = True
-    End If
-    r = wsL.Cells(wsL.Rows.Count, 1).End(xlUp).Row + 1
+
     ReDim a(1 To n, 1 To 11)
     For i = 1 To n
         it = mLog(i)
-        For k = 0 To 10
-            a(i, k + 1) = it(k)
+        a(i, 1) = CDbl(it(0))
+        For k = 1 To 10
+            t = CStr(it(k))
+            If Left$(t, 1) = "=" Then t = "'" & t     'tranh bi hieu thanh cong thuc
+            a(i, k + 1) = t
         Next k
     Next i
-    wsL.Range(wsL.Cells(r, 1), wsL.Cells(r + n - 1, 1)).NumberFormat = "dd/mm/yyyy hh:mm:ss"
-    wsL.Range(wsL.Cells(r, 1), wsL.Cells(r + n - 1, 11)).Value2 = a
+    wsL.Range(wsL.Cells(2, 1), wsL.Cells(n + 1, 1)).NumberFormat = "dd/mm/yyyy hh:mm:ss"
+    wsL.Range(wsL.Cells(2, 1), wsL.Cells(n + 1, 11)).Value2 = a
+    Exit Sub
+LogErr:
+    MsgBox "Loi khi ghi sheet LOG: " & Err.Number & " - " & Err.Description, vbExclamation
 End Sub
 
 Private Sub AddLog(ByVal sh As String, ByVal addr As String, ByVal title As String, ByVal mdl As String, _
