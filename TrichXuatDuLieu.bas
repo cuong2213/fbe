@@ -13,7 +13,7 @@ Option Explicit
 '   F Body Type | G Exterior Color | H Point | I N1 | J N3 | K Row | L Col
 ' Sheet DATA_FULL : danh sach DAY DU moi dong doc duoc (A:L).
 ' Sheet DATA      : chi cac dong co N1 > N_LIMIT hoac N3 > N_LIMIT (A:L) + 2 cot cong thuc
-'   M = K&"-"&L (Row-Col, vd 1-12) | N = COUNTIFS dem so dong cung Row&Col, Week, Body Type, Point
+'   O = Size (luon = SIZE_VALUE = 10) | M = K&"-"&L (Row-Col, vd 1-12) | N = COUNTIFS dem so dong cung Row&Col, Week, Body Type, Point
 ' File nay chi dung ky tu ASCII de import vao VBE khong bi loi font.
 '==============================================================================
 
@@ -29,6 +29,7 @@ Private Const MODEL_LAST_COL As Long = 10    'J: gioi han doc cua sheet MODEL
 Private Const DATA_FIRST_ROW As Long = 2
 Private Const WEEK_FORMULA As String = "ISOWEEKNUM"   'doi thanh WEEKNUM neu can
 Private Const COL_DATE_FMT As String = "dd/mm/yyyy"
+Private Const SIZE_VALUE As Long = 10          'DATA cot O (Size) luon bang gia tri nay
 Private Const N_LIMIT As Double = 7            'dat khi N1 > 7 hoac N3 > 7 (lon hon han, khong gom bang 7)
 
 Private Type TModel
@@ -441,7 +442,7 @@ Private Function WriteSheet(ws As Worksheet, ByVal onlyHit As Boolean) As Long
     ws.Range("A1:L1").Value2 = Array("STT", "DATE/NGAY", "Shift/Ca", "Week", "Part name", "Body Type", _
         "Exterior Color", "Point", "N1", "N3", "Row", "Col")
     If onlyHit Then
-        ws.Range("M1:N1").Value2 = Array("Row-Col", "SL (N1 hoac N3 > " & N_LIMIT & ")")
+        ws.Range("M1:O1").Value2 = Array("Row-Col", "SL (N1 hoac N3 > " & N_LIMIT & ")", "Size")
     End If
 
     n = mOut.Count
@@ -479,6 +480,7 @@ Private Function WriteSheet(ws As Worksheet, ByVal onlyHit As Boolean) As Long
         ws.Range(ws.Cells(r1, 13), ws.Cells(lastNew, 13)).Formula = "=K" & r1 & "&""-""&L" & r1
         ws.Range(ws.Cells(r1, 14), ws.Cells(lastNew, 14)).Formula = _
             "=COUNTIFS($M:$M,M" & r1 & ",$D:$D,D" & r1 & ",$F:$F,F" & r1 & ",$H:$H,H" & r1 & ")"
+        ws.Range(ws.Cells(r1, 15), ws.Cells(lastNew, 15)).Value2 = SIZE_VALUE    'O: Size = 10
     End If
     WriteSheet = k
 End Function
@@ -501,13 +503,13 @@ End Function
 Private Sub ClearOldData(ws As Worksheet)
     Dim lastR As Long, c As Long, r As Long
     lastR = DATA_FIRST_ROW
-    For c = 1 To 14
+    For c = 1 To 15
         r = ws.Cells(ws.Rows.Count, c).End(xlUp).Row
         If r > lastR Then lastR = r
     Next c
 
     ws.Range(ws.Cells(DATA_FIRST_ROW, 1), ws.Cells(lastR, 2)).ClearContents    'A:B
-    ws.Range(ws.Cells(DATA_FIRST_ROW, 4), ws.Cells(lastR, 14)).ClearContents   'D:N
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 4), ws.Cells(lastR, 15)).ClearContents   'D:O
 
     'Cot C (Shift): chi xoa gia tri go tay, giu lai cong thuc neu co
     On Error Resume Next
