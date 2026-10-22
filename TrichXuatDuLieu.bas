@@ -9,6 +9,11 @@ Option Explicit
 '   G..J     : bang mapping  G = "Model_Part name" | H = Point | I = Row | J = Col
 ' Body Type = ten Model (lay tu hang 1 cua MODEL). MNV va MINIVAN duoc coi la 1.
 ' Moi lan chay: XOA het data cu o DATA roi ghi lai tu dau, KHONG loc trung.
+' Dinh dang cot (cu): A STT | B Date | C Shift (khong dong toi) | D Week | E Part name
+'   F Body Type | G Exterior Color | H Point | I N1 | J N3 | K Row | L Col
+' Sheet DATA_FULL : danh sach DAY DU moi dong doc duoc (A:L).
+' Sheet DATA      : chi cac dong co N1 > N_LIMIT hoac N3 > N_LIMIT (A:L) + 2 cot cong thuc
+'   M = K&"-"&L (Row-Col, vd 1-12) | N = COUNTIFS dem so dong cung Row&Col, Week, Body Type, Point
 ' File nay chi dung ky tu ASCII de import vao VBE khong bi loi font.
 '==============================================================================
 
@@ -16,6 +21,7 @@ Option Explicit
 Private Const SH_MODEL As String = "MODEL"
 Private Const SH_DATA As String = "DATA"
 Private Const SH_LOG As String = "LOG"
+Private Const SH_FULL As String = "DATA_FULL"
 Private Const MDL_FIRST_COL As Long = 2      'B: cot Model dau tien
 Private Const MDL_LAST_COL As Long = 5       'E: cot Model cuoi cung
 Private Const MAP_FIRST_COL As Long = 7      'G: bat dau bang mapping
@@ -23,6 +29,7 @@ Private Const MODEL_LAST_COL As Long = 10    'J: gioi han doc cua sheet MODEL
 Private Const DATA_FIRST_ROW As Long = 2
 Private Const WEEK_FORMULA As String = "ISOWEEKNUM"   'doi thanh WEEKNUM neu can
 Private Const COL_DATE_FMT As String = "dd/mm/yyyy"
+Private Const N_LIMIT As Double = 7            'dat khi N1 > 7 hoac N3 > 7 (lon hon han, khong gom bang 7)
 
 Private Type TModel
     Name As String
@@ -39,7 +46,8 @@ Private mColorsO() As String
 Private mColorsN() As String
 Private mNColors As Long
 Private mMap As Object        'key = "MODEL PART|POINT" -> Array(Row, Col) hoac "DUP"
-Private mOut As Collection    'ket qua cho DATA
+Private mOut As Collection    'moi dong: Array(Date,Part,Model,Color,Point,N1,N3,Row,Col,Hit)
+Private mWritten As Long, mWrittenFull As Long
 Private mLog As Collection
 Private mSrcName As String
 Private mRx As Object
@@ -80,6 +88,7 @@ Public Sub TrichXuatDuLieu()
 
     Set mLog = New Collection
     Set mOut = New Collection
+    mWritten = 0: mWrittenFull = 0
     Set mMap = CreateObject("Scripting.Dictionary")
     Set mRx = CreateObject("VBScript.RegExp")
     mRx.Pattern = "(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})"
@@ -113,7 +122,9 @@ Cleanup:
     If Len(errMsg) > 0 Then
         MsgBox "Dung do loi, DATA chua duoc ghi. Xem sheet LOG." & vbLf & errMsg, vbCritical
     Else
-        MsgBox "Xong." & vbLf & "Bang xu ly: " & mTables & vbLf & "Dong ghi vao DATA: " & mAdded & _
+        MsgBox "Xong." & vbLf & "Bang xu ly: " & mTables & vbLf & "Dong nguon doc duoc: " & mAdded & _
+               vbLf & "Ghi vao " & SH_FULL & ": " & mWrittenFull & _
+               vbLf & "Ghi vao DATA (N1 hoac N3 > " & N_LIMIT & "): " & mWritten & _
                vbLf & "Dong/bang loi: " & mErr & _
                vbLf & "Chi tiet xem sheet LOG.", vbInformation
     End If
@@ -266,6 +277,7 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
     Dim rr As Long, pv As Variant, n1 As Variant, n3 As Variant, n1v As Variant, n3v As Variant
     Dim prefix As String, mk As String, mp As Variant, rowAddr As String
     Dim nAdd As Long, nErr As Long, bad As Boolean
+    Dim dKey As String, hit As Long
 
     tr = tt(0): tc = tt(1): mi = tt(2): titleText = tt(3)
     cS = tc: cE = tt(4)
@@ -304,9 +316,9 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
     'Ngay
     dState = ParseDate(titleText, dVal)
     If dState = 1 Then
-        dOut = dVal
+        dOut = dVal: dKey = CStr(CLng(dVal))
     Else
-        dOut = Empty
+        dOut = Empty: dKey = ""
         If dState = 2 Then AddLog ws.Name, addr, titleText, modelName, partO, colorO, "CANH BAO", "Ngay", "Ngay trong tieu de khong hop le, de trong"
     End If
 
@@ -379,68 +391,127 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
             nErr = nErr + 1: GoTo NextRow
         End If
 
-        mOut.Add Array(dOut, partO, modelName, colorO, pv, n1v, n3v, mp(0), mp(1))
+        'Dem dong dat dieu kien: N1 > N_LIMIT hoac N3 > N_LIMIT (o trong khong tinh)
+        hit = 0
+        If Not IsEmpty(n1v) Then
+            If n1v > N_LIMIT Then hit = 1
+        End If
+        If hit = 0 And Not IsEmpty(n3v) Then
+            If n3v > N_LIMIT Then hit = 1
+        End If
+
+        mOut.Add Array(dOut, partO, modelName, colorO, pv, n1v, n3v, mp(0), mp(1), hit)
         nAdd = nAdd + 1
 NextRow:
     Next rr
 
     mAdded = mAdded + nAdd: mErr = mErr + nErr
     AddLog ws.Name, addr, titleText, modelName, partO, colorO, IIf(nErr > 0, "CO LOI DONG", "OK"), "", _
-           "Them " & nAdd & " dong; loi " & nErr
+           "Doc " & nAdd & " dong; loi " & nErr
 End Sub
 
 '==============================================================================
 ' GHI DATA VA LOG
 '==============================================================================
 Private Sub WriteData(wsD As Worksheet)
-    Dim n As Long, i As Long, k As Long, it As Variant
-    Dim lastNew As Long
-    Dim a1() As Variant, a2() As Variant
+    Dim wsF As Worksheet
+    If mOut.Count = 0 Then Exit Sub          'khong co gi de ghi -> giu nguyen data cu
 
-    n = mOut.Count
-    If n = 0 Then Exit Sub          'khong co gi de ghi -> giu nguyen data cu
+    On Error Resume Next
+    Set wsF = wsD.Parent.Worksheets(SH_FULL)
+    On Error GoTo 0
+    If wsF Is Nothing Then
+        Set wsF = wsD.Parent.Worksheets.Add(After:=wsD)
+        wsF.Name = SH_FULL
+    End If
 
-    ClearOldData wsD
-
-    lastNew = DATA_FIRST_ROW + n - 1
-
-    ReDim a1(1 To n, 1 To 2)     'A:B
-    ReDim a2(1 To n, 1 To 8)     'E:L
-    For i = 1 To n
-        it = mOut(i)
-        a1(i, 1) = i             'STT tinh lai tu 1
-        a1(i, 2) = it(0)
-        For k = 1 To 8
-            a2(i, k) = it(k)
-        Next k
-    Next i
-
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 2), wsD.Cells(lastNew, 2)).NumberFormat = COL_DATE_FMT
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 1), wsD.Cells(lastNew, 2)).Value2 = a1
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 5), wsD.Cells(lastNew, 12)).Value2 = a2
-
-    'Cot C (Shift) bo qua. Cot D (Week) tinh tu cot B.
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 4), wsD.Cells(lastNew, 4)).Formula = _
-        "=IF(B" & DATA_FIRST_ROW & "="""",""""," & WEEK_FORMULA & "(B" & DATA_FIRST_ROW & "))"
+    mWrittenFull = WriteSheet(wsF, False)
+    mWritten = WriteSheet(wsD, True)
+    If mWritten = 0 Then AddLog "", "", "", "", "", "", "CANH BAO", "", "Khong co dong nao co N1 hoac N3 > " & N_LIMIT & " de ghi vao DATA"
 End Sub
 
-'Xoa noi dung cu o DATA (giu dinh dang, tieu de hang 1)
-Private Sub ClearOldData(wsD As Worksheet)
+'Xoa du lieu cu roi ghi lai. onlyHit = True: chi dong co N1 hoac N3 > N_LIMIT, them cot M, N (cong thuc).
+'Tra ve so dong da ghi.
+Private Function WriteSheet(ws As Worksheet, ByVal onlyHit As Boolean) As Long
+    Dim n As Long, k As Long, j As Long, lastNew As Long, it As Variant
+    Dim a1() As Variant, a2() As Variant, r1 As Long
+
+    ClearOldData ws
+
+    ws.Range("A1:L1").Value2 = Array("STT", "DATE/NGAY", "Shift/Ca", "Week", "Part name", "Body Type", _
+        "Exterior Color", "Point", "N1", "N3", "Row", "Col")
+    If onlyHit Then
+        ws.Range("M1:N1").Value2 = Array("Row-Col", "SL (N1 hoac N3 > " & N_LIMIT & ")")
+    End If
+
+    n = mOut.Count
+    ReDim a1(1 To n, 1 To 2)     'A:B
+    ReDim a2(1 To n, 1 To 8)     'E:L
+    For j = 1 To n
+        it = mOut(j)
+        If Not onlyHit Or it(9) = 1 Then
+            k = k + 1
+            a1(k, 1) = k             'STT tinh lai tu 1
+            a1(k, 2) = it(0)         'Date
+            a2(k, 1) = it(1)         'Part name
+            a2(k, 2) = it(2)         'Body Type (= Model)
+            a2(k, 3) = it(3)         'Exterior Color
+            a2(k, 4) = it(4)         'Point
+            a2(k, 5) = it(5)         'N1
+            a2(k, 6) = it(6)         'N3
+            a2(k, 7) = it(7)         'Row
+            a2(k, 8) = it(8)         'Col
+        End If
+    Next j
+    If k = 0 Then Exit Function
+
+    lastNew = DATA_FIRST_ROW + k - 1
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 2), ws.Cells(lastNew, 2)).NumberFormat = COL_DATE_FMT
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 1), ws.Cells(lastNew, 2)).Value2 = ResizeRows(a1, k)
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 5), ws.Cells(lastNew, 12)).Value2 = ResizeRows(a2, k)
+
+    'Cot C (Shift) bo qua. Cot D (Week) tinh tu cot B.
+    r1 = DATA_FIRST_ROW
+    ws.Range(ws.Cells(r1, 4), ws.Cells(lastNew, 4)).Formula = _
+        "=IF(B" & r1 & "="""",""""," & WEEK_FORMULA & "(B" & r1 & "))"
+
+    If onlyHit Then
+        ws.Range(ws.Cells(r1, 13), ws.Cells(lastNew, 13)).Formula = "=K" & r1 & "&""-""&L" & r1
+        ws.Range(ws.Cells(r1, 14), ws.Cells(lastNew, 14)).Formula = _
+            "=COUNTIFS($M:$M,M" & r1 & ",$D:$D,D" & r1 & ",$F:$F,F" & r1 & ",$H:$H,H" & r1 & ")"
+    End If
+    WriteSheet = k
+End Function
+
+'Cat mang 2 chieu (chi so 1..) xuong k dong dau
+Private Function ResizeRows(arr() As Variant, ByVal k As Long) As Variant
+    Dim r() As Variant, i As Long, c As Long, nc As Long
+    If k = UBound(arr, 1) Then ResizeRows = arr: Exit Function
+    nc = UBound(arr, 2)
+    ReDim r(1 To k, 1 To nc)
+    For i = 1 To k
+        For c = 1 To nc
+            r(i, c) = arr(i, c)
+        Next c
+    Next i
+    ResizeRows = r
+End Function
+
+'Xoa noi dung cu (giu dinh dang va tieu de hang 1)
+Private Sub ClearOldData(ws As Worksheet)
     Dim lastR As Long, c As Long, r As Long
     lastR = DATA_FIRST_ROW
-    For c = 1 To 12
-        r = wsD.Cells(wsD.Rows.Count, c).End(xlUp).Row
+    For c = 1 To 14
+        r = ws.Cells(ws.Rows.Count, c).End(xlUp).Row
         If r > lastR Then lastR = r
     Next c
-    If lastR < DATA_FIRST_ROW Then Exit Sub
 
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 1), wsD.Cells(lastR, 2)).ClearContents    'A:B
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 4), wsD.Cells(lastR, 4)).ClearContents    'D (Week, ghi lai sau)
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 5), wsD.Cells(lastR, 12)).ClearContents   'E:L
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 1), ws.Cells(lastR, 2)).ClearContents    'A:B
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 4), ws.Cells(lastR, 14)).ClearContents   'D:N
 
     'Cot C (Shift): chi xoa gia tri go tay, giu lai cong thuc neu co
     On Error Resume Next
-    wsD.Range(wsD.Cells(DATA_FIRST_ROW, 3), wsD.Cells(lastR, 3)).SpecialCells(xlCellTypeConstants).ClearContents
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 3), ws.Cells(lastR, 3)).SpecialCells(xlCellTypeConstants).ClearContents
     On Error GoTo 0
 End Sub
 
