@@ -11,9 +11,12 @@ Option Explicit
 ' Moi lan chay: XOA het data cu o DATA roi ghi lai tu dau, KHONG loc trung.
 ' Dinh dang cot (cu): A STT | B Date | C Shift (khong dong toi) | D Week | E Part name
 '   F Body Type | G Exterior Color | H Point | I N1 | J N3 | K Row | L Col
-' Sheet DATA_FULL : danh sach DAY DU moi dong doc duoc (A:L).
-' Sheet DATA      : chi cac dong co N1 > N_LIMIT hoac N3 > N_LIMIT (A:L) + 2 cot cong thuc
-'   O = Size (luon = SIZE_VALUE = 10) | M = K&"-"&L (Row-Col, vd 1-12) | N = COUNTIFS dem so dong cung Row&Col, Week, Body Type, Point
+' Sheet DATA_FULL : danh sach DAY DU moi dong doc duoc (A:L) + M = STD (lay tu cot STD cua bang nguon).
+' Sheet DATA      : DAY DU moi dong (A:L) + them cot:
+'   M = K&"-"&L (Row-Col) | N = so luong theo Level (COUNTIFS cung Row-Col, Week, Body Type, Point, Level)
+'   O = Size (luon = SIZE_VALUE = 10) | P = Level
+' Level so sanh N1, N3 voi STD cua dong: OK = N1 va N3 deu < STD
+'   1 = khong co gia tri nao > STD va it nhat 1 gia tri = STD | 2 = N1 hoac N3 > STD
 ' File nay chi dung ky tu ASCII de import vao VBE khong bi loi font.
 '==============================================================================
 
@@ -30,7 +33,6 @@ Private Const DATA_FIRST_ROW As Long = 2
 Private Const WEEK_FORMULA As String = "ISOWEEKNUM"   'doi thanh WEEKNUM neu can
 Private Const COL_DATE_FMT As String = "dd/mm/yyyy"
 Private Const SIZE_VALUE As Long = 10          'DATA cot O (Size) luon bang gia tri nay
-Private Const N_LIMIT As Double = 7            'dat khi N1 > 7 hoac N3 > 7 (lon hon han, khong gom bang 7)
 
 Private Type TModel
     Name As String
@@ -125,7 +127,7 @@ Cleanup:
     Else
         MsgBox "Xong." & vbLf & "Bang xu ly: " & mTables & vbLf & "Dong nguon doc duoc: " & mAdded & _
                vbLf & "Ghi vao " & SH_FULL & ": " & mWrittenFull & _
-               vbLf & "Ghi vao DATA (N1 hoac N3 > " & N_LIMIT & "): " & mWritten & _
+               vbLf & "Ghi vao DATA: " & mWritten & _
                vbLf & "Dong/bang loi: " & mErr & _
                vbLf & "Chi tiet xem sheet LOG.", vbInformation
     End If
@@ -274,11 +276,11 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
     Dim tn As String, modelName As String, partO As String, colorO As String
     Dim pi As Long, ci As Long, dVal As Double, dState As Long, dOut As Variant
     Dim hr As Long, c As Long, h As String, missing As String, dupHdr As String
-    Dim cP As Long, cN1 As Long, cN3 As Long, cS As Long, cE As Long
+    Dim cP As Long, cN1 As Long, cN3 As Long, cSTD As Long, cS As Long, cE As Long
     Dim rr As Long, pv As Variant, n1 As Variant, n3 As Variant, n1v As Variant, n3v As Variant
     Dim prefix As String, mk As String, mp As Variant, rowAddr As String
     Dim nAdd As Long, nErr As Long, bad As Boolean
-    Dim dKey As String, hit As Long
+    Dim dKey As String, lv As Variant, sd As Variant, sdv As Variant
 
     tr = tt(0): tc = tt(1): mi = tt(2): titleText = tt(3)
     cS = tc: cE = tt(4)
@@ -336,12 +338,17 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
                 Case "POINT": If cP <> 0 Then dupHdr = dupHdr & "Point " Else cP = c
                 Case "N1": If cN1 <> 0 Then dupHdr = dupHdr & "N1 " Else cN1 = c
                 Case "N3": If cN3 <> 0 Then dupHdr = dupHdr & "N3 " Else cN3 = c
+                Case Else
+                    If Left$(h, 3) = "STD" Then
+                        If cSTD <> 0 Then dupHdr = dupHdr & "STD " Else cSTD = c
+                    End If
             End Select
         End If
     Next c
     If cP = 0 Then missing = missing & "Point "
     If cN1 = 0 Then missing = missing & "N1 "
     If cN3 = 0 Then missing = missing & "N3 "
+    If cSTD = 0 Then missing = missing & "STD "
     If Len(missing) > 0 Or Len(dupHdr) > 0 Then
         AddLog ws.Name, addr, titleText, modelName, partO, colorO, "LOI", "Tieu de cot", _
                IIf(Len(missing) > 0, "Thieu cot bat buoc: " & Trim$(missing) & ". ", "") & _
@@ -355,7 +362,7 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
     For rr = hr + 1 To nR
         If TitleInBand(tabs, rr, cS, cE) Then Exit For
         If RowBlank(v, rr, cS, cE) Then Exit For
-        pv = v(rr, cP): n1 = v(rr, cN1): n3 = v(rr, cN3)
+        pv = v(rr, cP): n1 = v(rr, cN1): n3 = v(rr, cN3): sd = v(rr, cSTD)
         If IsBlank(pv) And IsBlank(n1) And IsBlank(n3) Then GoTo NextRow
         rowAddr = ws.Cells(r0 + rr - 1, c0 + cP - 1).Address(False, False)
 
@@ -371,6 +378,13 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
         End If
         If Not ToNum(n3, n3v) Then
             AddLog ws.Name, rowAddr, titleText, modelName, partO, colorO, "LOI DONG", "N3", "Dong " & (r0 + rr - 1) & ": N3 khong phai so"
+            bad = True
+        End If
+        If Not ToNum(sd, sdv) Then
+            AddLog ws.Name, rowAddr, titleText, modelName, partO, colorO, "LOI DONG", "STD", "Dong " & (r0 + rr - 1) & ": STD khong phai so"
+            bad = True
+        ElseIf IsEmpty(sdv) Then
+            AddLog ws.Name, rowAddr, titleText, modelName, partO, colorO, "LOI DONG", "STD", "Dong " & (r0 + rr - 1) & ": STD trong, khong xac dinh duoc Level"
             bad = True
         End If
         If bad Then nErr = nErr + 1: GoTo NextRow
@@ -392,16 +406,13 @@ Private Sub ProcessTable(ws As Worksheet, v As Variant, ByVal r0 As Long, ByVal 
             nErr = nErr + 1: GoTo NextRow
         End If
 
-        'Dem dong dat dieu kien: N1 > N_LIMIT hoac N3 > N_LIMIT (o trong khong tinh)
-        hit = 0
-        If Not IsEmpty(n1v) Then
-            If n1v > N_LIMIT Then hit = 1
-        End If
-        If hit = 0 And Not IsEmpty(n3v) Then
-            If n3v > N_LIMIT Then hit = 1
+        lv = CalcLevel(n1v, n3v, sdv)
+        If IsEmpty(lv) Then
+            AddLog ws.Name, rowAddr, titleText, modelName, partO, colorO, "LOI DONG", "N1/N3", "Dong " & (r0 + rr - 1) & ": N1 va N3 deu trong, khong xac dinh duoc Level"
+            nErr = nErr + 1: GoTo NextRow
         End If
 
-        mOut.Add Array(dOut, partO, modelName, colorO, pv, n1v, n3v, mp(0), mp(1), hit)
+        mOut.Add Array(dOut, partO, modelName, colorO, pv, n1v, n3v, mp(0), mp(1), lv, sdv)
         nAdd = nAdd + 1
 NextRow:
     Next rr
@@ -428,88 +439,109 @@ Private Sub WriteData(wsD As Worksheet)
 
     mWrittenFull = WriteSheet(wsF, False)
     mWritten = WriteSheet(wsD, True)
-    If mWritten = 0 Then AddLog "", "", "", "", "", "", "CANH BAO", "", "Khong co dong nao co N1 hoac N3 > " & N_LIMIT & " de ghi vao DATA"
 End Sub
 
-'Xoa du lieu cu roi ghi lai. onlyHit = True: chi dong co N1 hoac N3 > N_LIMIT, them cot M, N (cong thuc).
+'Xoa du lieu cu roi ghi lai toan bo dong. isData = True: sheet DATA (them cot M:P), False: DATA_FULL (them cot M = STD).
 'Tra ve so dong da ghi.
-Private Function WriteSheet(ws As Worksheet, ByVal onlyHit As Boolean) As Long
-    Dim n As Long, k As Long, j As Long, lastNew As Long, it As Variant
-    Dim a1() As Variant, a2() As Variant, r1 As Long
+Private Function WriteSheet(ws As Worksheet, ByVal isData As Boolean) As Long
+    Dim n As Long, i As Long, lastNew As Long, it As Variant
+    Dim a1() As Variant, a2() As Variant, a3() As Variant, r1 As Long
 
     ClearOldData ws
 
     ws.Range("A1:L1").Value2 = Array("STT", "DATE/NGAY", "Shift/Ca", "Week", "Part name", "Body Type", _
         "Exterior Color", "Point", "N1", "N3", "Row", "Col")
-    If onlyHit Then
-        ws.Range("M1:O1").Value2 = Array("Row-Col", "SL (N1 hoac N3 > " & N_LIMIT & ")", "Size")
+    If isData Then
+        ws.Range("M1:P1").Value2 = Array("Row-Col", "SL theo Level", "Size", "Level")
+    Else
+        ws.Range("M1").Value2 = "STD"
     End If
 
     n = mOut.Count
+    If n = 0 Then Exit Function
     ReDim a1(1 To n, 1 To 2)     'A:B
     ReDim a2(1 To n, 1 To 8)     'E:L
-    For j = 1 To n
-        it = mOut(j)
-        If Not onlyHit Or it(9) = 1 Then
-            k = k + 1
-            a1(k, 1) = k             'STT tinh lai tu 1
-            a1(k, 2) = it(0)         'Date
-            a2(k, 1) = it(1)         'Part name
-            a2(k, 2) = it(2)         'Body Type (= Model)
-            a2(k, 3) = it(3)         'Exterior Color
-            a2(k, 4) = it(4)         'Point
-            a2(k, 5) = it(5)         'N1
-            a2(k, 6) = it(6)         'N3
-            a2(k, 7) = it(7)         'Row
-            a2(k, 8) = it(8)         'Col
-        End If
-    Next j
-    If k = 0 Then Exit Function
+    ReDim a3(1 To n, 1 To 1)     'P (Level) hoac M (STD)
+    For i = 1 To n
+        it = mOut(i)
+        a1(i, 1) = i             'STT tinh lai tu 1
+        a1(i, 2) = it(0)         'Date
+        a2(i, 1) = it(1)         'Part name
+        a2(i, 2) = it(2)         'Body Type (= Model)
+        a2(i, 3) = it(3)         'Exterior Color
+        a2(i, 4) = it(4)         'Point
+        a2(i, 5) = it(5)         'N1
+        a2(i, 6) = it(6)         'N3
+        a2(i, 7) = it(7)         'Row
+        a2(i, 8) = it(8)         'Col
+        If isData Then a3(i, 1) = it(9) Else a3(i, 1) = it(10)
+    Next i
 
-    lastNew = DATA_FIRST_ROW + k - 1
-    ws.Range(ws.Cells(DATA_FIRST_ROW, 2), ws.Cells(lastNew, 2)).NumberFormat = COL_DATE_FMT
-    ws.Range(ws.Cells(DATA_FIRST_ROW, 1), ws.Cells(lastNew, 2)).Value2 = ResizeRows(a1, k)
-    ws.Range(ws.Cells(DATA_FIRST_ROW, 5), ws.Cells(lastNew, 12)).Value2 = ResizeRows(a2, k)
+    r1 = DATA_FIRST_ROW
+    lastNew = r1 + n - 1
+    ws.Range(ws.Cells(r1, 2), ws.Cells(lastNew, 2)).NumberFormat = COL_DATE_FMT
+    ws.Range(ws.Cells(r1, 1), ws.Cells(lastNew, 2)).Value2 = a1
+    ws.Range(ws.Cells(r1, 5), ws.Cells(lastNew, 12)).Value2 = a2
 
     'Cot C (Shift) bo qua. Cot D (Week) tinh tu cot B.
-    r1 = DATA_FIRST_ROW
     ws.Range(ws.Cells(r1, 4), ws.Cells(lastNew, 4)).Formula = _
         "=IF(B" & r1 & "="""",""""," & WEEK_FORMULA & "(B" & r1 & "))"
 
-    If onlyHit Then
+    If isData Then
+        ws.Range(ws.Cells(r1, 16), ws.Cells(lastNew, 16)).Value2 = a3                   'P: Level
         ws.Range(ws.Cells(r1, 13), ws.Cells(lastNew, 13)).Formula = "=K" & r1 & "&""-""&L" & r1
         ws.Range(ws.Cells(r1, 14), ws.Cells(lastNew, 14)).Formula = _
-            "=COUNTIFS($M:$M,M" & r1 & ",$D:$D,D" & r1 & ",$F:$F,F" & r1 & ",$H:$H,H" & r1 & ")"
-        ws.Range(ws.Cells(r1, 15), ws.Cells(lastNew, 15)).Value2 = SIZE_VALUE    'O: Size = 10
+            "=COUNTIFS($M:$M,M" & r1 & ",$D:$D,D" & r1 & ",$F:$F,F" & r1 & ",$H:$H,H" & r1 & ",$P:$P,P" & r1 & ")"
+        ws.Range(ws.Cells(r1, 15), ws.Cells(lastNew, 15)).Value2 = SIZE_VALUE            'O: Size = 10
+    Else
+        ws.Range(ws.Cells(r1, 13), ws.Cells(lastNew, 13)).Value2 = a3                    'M: STD
     End If
-    WriteSheet = k
+    WriteSheet = n
 End Function
 
-'Cat mang 2 chieu (chi so 1..) xuong k dong dau
-Private Function ResizeRows(arr() As Variant, ByVal k As Long) As Variant
-    Dim r() As Variant, i As Long, c As Long, nc As Long
-    If k = UBound(arr, 1) Then ResizeRows = arr: Exit Function
-    nc = UBound(arr, 2)
-    ReDim r(1 To k, 1 To nc)
-    For i = 1 To k
-        For c = 1 To nc
-            r(i, c) = arr(i, c)
-        Next c
-    Next i
-    ResizeRows = r
+'Level theo STD cua dong: "OK" / 1 / 2. Tra ve Empty neu N1 va N3 deu trong.
+'  2  : N1 hoac N3 > STD
+'  1  : khong co gia tri nao > STD va it nhat 1 gia tri = STD
+'  OK : moi gia tri co mat deu < STD (o trong khong tinh)
+Private Function CalcLevel(n1 As Variant, n3 As Variant, std As Variant) As Variant
+    Dim hasAny As Boolean, gt As Boolean, eq As Boolean
+    If Not IsEmpty(n1) Then
+        hasAny = True
+        If n1 > std Then
+            gt = True
+        ElseIf n1 = std Then
+            eq = True
+        End If
+    End If
+    If Not IsEmpty(n3) Then
+        hasAny = True
+        If n3 > std Then
+            gt = True
+        ElseIf n3 = std Then
+            eq = True
+        End If
+    End If
+    If Not hasAny Then Exit Function
+    If gt Then
+        CalcLevel = 2
+    ElseIf eq Then
+        CalcLevel = 1
+    Else
+        CalcLevel = "OK"
+    End If
 End Function
 
 'Xoa noi dung cu (giu dinh dang va tieu de hang 1)
 Private Sub ClearOldData(ws As Worksheet)
     Dim lastR As Long, c As Long, r As Long
     lastR = DATA_FIRST_ROW
-    For c = 1 To 15
+    For c = 1 To 16
         r = ws.Cells(ws.Rows.Count, c).End(xlUp).Row
         If r > lastR Then lastR = r
     Next c
 
     ws.Range(ws.Cells(DATA_FIRST_ROW, 1), ws.Cells(lastR, 2)).ClearContents    'A:B
-    ws.Range(ws.Cells(DATA_FIRST_ROW, 4), ws.Cells(lastR, 15)).ClearContents   'D:O
+    ws.Range(ws.Cells(DATA_FIRST_ROW, 4), ws.Cells(lastR, 16)).ClearContents   'D:P
 
     'Cot C (Shift): chi xoa gia tri go tay, giu lai cong thuc neu co
     On Error Resume Next
