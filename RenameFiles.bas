@@ -47,6 +47,7 @@ Public Sub PreviewRename()
     Dim newBase As String, newFull As String
     Dim reason As String
     Dim cntReady As Long, cntSkip As Long
+    Dim dupNo As Long           ' counter for duplicate suffix (_1, _2, ...)
 
     ' ---- 1. Pick folder ------------------------------------------------------
     folderPath = PickFolder()
@@ -157,24 +158,29 @@ Public Sub PreviewRename()
                 newFull = newBase
                 If Len(ext) > 0 Then newFull = newFull & "." & ext
 
-                If Len(dirs(i)) + Len(newFull) > MAX_PATH_LEN Then
-                    result(i, 3) = newFull
-                    result(i, 5) = "Skip"
-                    result(i, 6) = "Path Too Long"
+                ' Duplicate: target already exists in the SAME folder, or another
+                ' file got it first -> add suffix _1, _2, _3 ... until unique.
+                ' (Long paths are NOT skipped anymore.)
+                dupNo = 0
+                Do While existing.Exists(dirs(i) & newFull) Or newNames.Exists(dirs(i) & newFull)
+                    dupNo = dupNo + 1
+                    newFull = newBase & "_" & dupNo
+                    If Len(ext) > 0 Then newFull = newFull & "." & ext
+                Loop
 
-                ElseIf existing.Exists(dirs(i) & newFull) Or newNames.Exists(dirs(i) & newFull) Then
-                    ' target already exists in the SAME folder, or another file got it first
-                    result(i, 3) = newFull
-                    result(i, 5) = "Skip"
-                    result(i, 6) = "Duplicate Name"
+                newNames(dirs(i) & newFull) = 1
+                result(i, 3) = newFull
+                result(i, 5) = "Ready"
 
+                ' Reason: "reason" is filled by BuildNewBase when today's date was used
+                If dupNo > 0 Then
+                    result(i, 6) = "Will Rename (Duplicate - added _" & dupNo & ")"
+                ElseIf Len(reason) > 0 Then
+                    result(i, 6) = reason
                 Else
-                    newNames(dirs(i) & newFull) = 1
-                    result(i, 3) = newFull
-                    result(i, 5) = "Ready"
                     result(i, 6) = "Will Rename"
-                    cntReady = cntReady + 1
                 End If
+                cntReady = cntReady + 1
             End If
         End If
 
@@ -251,6 +257,7 @@ Public Sub ConfirmRename()
     Dim readyCount As Long
     Dim oldPath As String, newPath As String
     Dim cntOK As Long, cntDup As Long, cntErr As Long
+    Dim cntSkip As Long         ' files that could not be renamed (e.g. open/locked)
     Dim errTxt As String
     Dim logStart As Long
 
@@ -327,9 +334,11 @@ Public Sub ConfirmRename()
                     errTxt = Err.Number & " - " & Err.Description
                     Err.Clear
                     On Error GoTo 0
-                    stat(i, 1) = "Error": stat(i, 2) = errTxt
-                    logArr(k, 4) = "Error: " & errTxt
-                    cntErr = cntErr + 1
+                    ' cannot rename (file may be open / locked / no permission):
+                    ' skip it, keep going, and record it in the log
+                    stat(i, 1) = "Skip": stat(i, 2) = "Cannot rename (file may be open): " & errTxt
+                    logArr(k, 4) = "Skip: Cannot rename (file may be open) - " & errTxt
+                    cntSkip = cntSkip + 1
                 Else
                     On Error GoTo 0
                     stat(i, 1) = "Success": stat(i, 2) = "Renamed"
@@ -368,6 +377,7 @@ Public Sub ConfirmRename()
     MsgBox "Rename completed." & vbCrLf & _
            "Success  : " & cntOK & vbCrLf & _
            "Duplicate: " & cntDup & vbCrLf & _
+           "Skipped (cannot rename, maybe open): " & cntSkip & vbCrLf & _
            "Error    : " & cntErr & vbCrLf & _
            "See sheet Rename_Log for details.", vbInformation
 End Sub
@@ -376,8 +386,8 @@ End Sub
 ' NAME BUILDING
 '==============================================================================
 
-' Returns the new base name (without extension), or "" with reason when the
-' file must be skipped ("No Date Found" / "Empty Name").
+' Returns the new base name (without extension), or "" with reason "Empty Name".
+' When no date is found in the name, today's date is used and reason is filled.
 Private Function BuildNewBase(ByVal baseName As String, ByRef reason As String) As String
 
     Dim s As String
@@ -434,9 +444,10 @@ Private Function BuildNewBase(ByVal baseName As String, ByRef reason As String) 
         finalDate = trailDate
     End If
 
+    ' no date in the name -> use today's date
     If Len(finalDate) = 0 Then
-        reason = "No Date Found"
-        Exit Function
+        finalDate = Format$(Date, "ddmmyyyy")
+        reason = "Will Rename (No Date Found - used today)"
     End If
 
     s = TrimUnderscore(s)
