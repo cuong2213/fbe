@@ -329,7 +329,9 @@ Public Sub ConfirmRename()
 
             Else
                 On Error Resume Next
-                Name oldPath As newPath
+                ' fso.MoveFile is Unicode-safe (the VBA "Name" statement is ANSI only
+                ' and fails with error 52 on Vietnamese / non-ANSI characters)
+                fso.MoveFile oldPath, newPath
                 If Err.Number <> 0 Then
                     errTxt = Err.Number & " - " & Err.Description
                     Err.Clear
