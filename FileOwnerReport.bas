@@ -3,21 +3,24 @@ Option Explicit
 
 '==============================================================================
 ' MODULE : FileOwnerReport
-' PURPOSE: List every file of a folder (and its sub-folders) with:
+' PURPOSE: List the files you can SEE in Explorer (folder + sub-folders) with
+'          the same values as Windows > Properties > Details:
 '            - File name
-'            - Owner          (NTFS owner of the file)
-'            - Last Saved By  (Office "Last saved by" property: xlsx, xlsm, docx,
-'                              pptx, xls, doc, ppt ... blank for other types)
+'            - Authors        (Details tab: Authors)
+'            - Last Saved By  (Details tab: Last saved by)
 '            - Date modified, Folder path, clickable Link
-'          Result is sorted by PERSON first: Owner -> Last Saved By -> File name.
+'          Sorted by PERSON first: Authors -> Last Saved By -> File name
+'
+' NOT LISTED (not visible in Explorer):
+'          - hidden / system files and hidden / system folders
+'          - "xxx_files" resource folders of a saved web page (xxx.htm / xxx.html)
 '
 ' RUN    : ListFileOwners()   (Alt+F8)
 ' OUTPUT : sheet "File_Owner"  (cleared and rebuilt on every run)
 '
-' NOTES  : - Owner / Last Saved By are read with Shell.Application
-'            (FolderItem.ExtendedProperty), so files are NOT opened in Office.
-'          - Reading properties from a network drive can be slow
-'            (roughly a few files per second up to a few dozen per second).
+' NOTES  : - Values are read with Shell.Application (FolderItem.ExtendedProperty),
+'            the same source as the Details tab. Files are NOT opened in Office.
+'          - Reading properties from a network drive can be slow.
 '==============================================================================
 
 Private Const SHEET_NAME As String = "File_Owner"
@@ -53,7 +56,7 @@ Public Sub ListFileOwners()
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set shl = CreateObject("Shell.Application")
 
-    ' ---- 2. Pass 1: collect folder list and count files ----------------------
+    ' ---- 2. Pass 1: collect visible folders and count files ------------------
     Set stack = New Collection
     Set folders = New Collection
     stack.Add folderPath
@@ -72,7 +75,10 @@ Public Sub ListFileOwners()
             total = total + fol.Files.Count
             If INCLUDE_SUBFOLDERS Then
                 For Each sf In fol.SubFolders
-                    stack.Add sf.Path
+                    ' skip hidden/system folders and web page "xxx_files" folders
+                    If (sf.Attributes And 6) = 0 Then
+                        If Not IsWebResourceFolder(fso, curDir, sf.Name) Then stack.Add sf.Path
+                    End If
                 Next sf
             End If
         End If
@@ -87,7 +93,7 @@ Public Sub ListFileOwners()
         Exit Sub
     End If
 
-    ' ---- 3. Pass 2: read properties of every file ----------------------------
+    ' ---- 3. Pass 2: read properties of every visible file --------------------
     ReDim res(1 To total, 1 To 7)
     k = 0
 
@@ -104,23 +110,25 @@ Public Sub ListFileOwners()
         If Not fol Is Nothing Then
             For Each f In fol.Files
                 If k >= total Then Exit For         ' new file appeared meanwhile
-                k = k + 1
 
-                res(k, 1) = k
+                ' hidden / system files are not visible in Explorer -> not listed
+                If (f.Attributes And 6) <> 0 Then GoTo NextFile
+
+                k = k + 1
                 res(k, 2) = f.Name
+                res(k, 3) = ""
+                res(k, 4) = ""
                 res(k, 5) = f.DateLastModified
                 res(k, 6) = curDir
 
                 ' properties are read with error protection (some files deny it)
                 On Error Resume Next
-                res(k, 3) = ""
-                res(k, 4) = ""
                 If Not ns Is Nothing Then
                     Set itm = Nothing
                     Set itm = ns.ParseName(f.Name)
                     If Not itm Is Nothing Then
-                        res(k, 3) = itm.ExtendedProperty("System.FileOwner") & ""
-                        res(k, 4) = itm.ExtendedProperty("System.Document.LastAuthor") & ""
+                        res(k, 3) = PropText(itm.ExtendedProperty("System.Author"))
+                        res(k, 4) = PropText(itm.ExtendedProperty("System.Document.LastAuthor"))
                     End If
                 End If
                 On Error GoTo ErrHandler
@@ -129,6 +137,7 @@ Public Sub ListFileOwners()
                 res(k, 7) = "=HYPERLINK(F" & (k + 1) & "&B" & (k + 1) & ",""Open"")"
 
                 If k Mod 100 = 0 Then Application.StatusBar = "Reading properties... " & k & " / " & total
+NextFile:
             Next f
         End If
     Next p
@@ -136,23 +145,26 @@ Public Sub ListFileOwners()
     n = k
     If n = 0 Then
         RestoreApp
-        MsgBox "No readable file found.", vbInformation
+        MsgBox "No visible file found.", vbInformation
         Exit Sub
     End If
 
     ' ---- 4. Write result to sheet (one shot) -----------------------------------
     Set ws = GetOrCreateSheet(SHEET_NAME)
     ws.Cells.Clear
-    ws.Range("A1:G1").Value = Array("STT", "File Name", "Owner", "Last Saved By", _
-                                    "Date Modified", "Folder Path", "Link")
+    ws.Range("A1:G1").Value = Array("STT", "File Name", "Authors", _
+                                    "Last Saved By", "Date Modified", "Folder Path", "Link")
 
     ws.Range("B2:D" & total + 1).NumberFormat = "@"
     ws.Range("F2:F" & total + 1).NumberFormat = "@"
     ws.Range("E2:E" & total + 1).NumberFormat = "dd/mm/yyyy hh:mm"
     ws.Range("A2").Resize(total, 7).Value = res
-    lastRow = total + 1
 
-    ' ---- 5. Sort: PERSON first (Owner -> Last Saved By -> File Name) ----------
+    ' hidden files were counted in "total" but not listed -> clear unused rows
+    If n < total Then ws.Range("A" & n + 2 & ":G" & total + 1).Clear
+    lastRow = n + 1
+
+    ' ---- 5. Sort: PERSON first (Authors -> Last Saved By -> File Name) --------
     Application.Calculation = xlCalculationAutomatic
     With ws.Sort
         .SortFields.Clear
@@ -164,12 +176,12 @@ Public Sub ListFileOwners()
         .Apply
     End With
 
-    ' renumber STT after sorting
-    ReDim stt(1 To total, 1 To 1)
-    For i = 1 To total
+    ' numbering after sorting
+    ReDim stt(1 To n, 1 To 1)
+    For i = 1 To n
         stt(i, 1) = i
     Next i
-    ws.Range("A2").Resize(total, 1).Value = stt
+    ws.Range("A2").Resize(n, 1).Value = stt
 
     ' ---- 6. Formatting ---------------------------------------------------------
     With ws.Range("A1:G1")
@@ -189,7 +201,7 @@ Public Sub ListFileOwners()
 
     RestoreApp
     MsgBox "Done. " & n & " files listed." & vbCrLf & _
-           "Sorted by: Owner > Last Saved By > File Name.", vbInformation
+           "Sorted by: Authors > Last Saved By > File Name.", vbInformation
     Exit Sub
 
 ErrHandler:
@@ -200,6 +212,29 @@ End Sub
 '==============================================================================
 ' HELPERS
 '==============================================================================
+
+' Property value -> text. "Authors" can be a list (array): join with "; "
+Private Function PropText(ByVal v As Variant) As String
+    On Error Resume Next
+    If IsArray(v) Then
+        PropText = Join(v, "; ")
+    ElseIf Not IsNull(v) And Not IsEmpty(v) Then
+        PropText = CStr(v)
+    End If
+End Function
+
+' True when folder is the resource folder of a saved web page, e.g. folder
+' "Report_files" next to "Report.htm" / "Report.html" (images, css, js inside)
+Private Function IsWebResourceFolder(ByVal fso As Object, ByVal parentDir As String, _
+                                     ByVal folderName As String) As Boolean
+    Dim baseName As String
+    If LCase$(Right$(folderName, 6)) <> "_files" Then Exit Function
+    baseName = Left$(folderName, Len(folderName) - 6)
+    If Len(baseName) = 0 Then Exit Function
+    IsWebResourceFolder = fso.FileExists(parentDir & baseName & ".htm") _
+                       Or fso.FileExists(parentDir & baseName & ".html")
+End Function
+
 Private Function GetOrCreateSheet(ByVal shName As String) As Worksheet
     Dim ws As Worksheet
     On Error Resume Next
