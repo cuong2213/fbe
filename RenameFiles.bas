@@ -84,13 +84,20 @@ Public Sub PreviewRename()
         Set fol = fso.GetFolder(curDir)
         If Not fol Is Nothing Then
             For Each sf In fol.SubFolders
-                stack.Add sf.Path
+                ' skip hidden/system folders and "xxx_files" resource folders
+                ' that belong to a saved web page (xxx.htm / xxx.html)
+                If (sf.Attributes And 6) = 0 Then
+                    If Not IsWebResourceFolder(fso, curDir, sf.Name) Then stack.Add sf.Path
+                End If
             Next sf
         End If
         On Error GoTo ErrHandler
 
         If Not fol Is Nothing Then
             For Each f In fol.Files
+                existing(curDir & f.Name) = 1       ' remember every existing path
+                ' hidden / system files are not visible in Explorer -> not listed
+                If (f.Attributes And 6) <> 0 Then GoTo NextFile
                 n = n + 1
                 If n > cap Then                     ' grow arrays (doubling)
                     cap = cap * 2
@@ -99,7 +106,7 @@ Public Sub PreviewRename()
                 End If
                 names(n) = f.Name
                 dirs(n) = curDir
-                existing(curDir & f.Name) = 1       ' remember every existing path
+NextFile:
             Next f
         End If
 
@@ -582,12 +589,9 @@ End Function
 
 ' Thumbs.db, desktop.ini, ~$*, *.tmp, *.log, *.bak, *.dwl, *.dwl2
 Private Function IsSystemFile(ByVal lName As String) As Boolean
-    If lName = "thumbs.db" Or lName = "desktop.ini" Then
-        IsSystemFile = True
-    ElseIf Left$(lName, 2) = "~$" Then
-        IsSystemFile = True
-    ElseIf lName Like "*.tmp" Or lName Like "*.log" Or lName Like "*.bak" _
-        Or lName Like "*.dwl" Or lName Like "*.dwl2" Then
+    ' Only *.db files (e.g. Thumbs.db) are treated as system files now.
+    ' desktop.ini, ~$*, *.tmp, *.log, *.bak, *.dwl, *.dwl2 are renamed normally.
+    If lName Like "*.db" Then
         IsSystemFile = True
     End If
 End Function
@@ -603,6 +607,18 @@ End Function
 '==============================================================================
 ' HELPERS
 '==============================================================================
+
+' True when folder is the resource folder of a saved web page, e.g. folder
+' "Report_files" next to "Report.htm" / "Report.html" (images, css, js inside)
+Private Function IsWebResourceFolder(ByVal fso As Object, ByVal parentDir As String, _
+                                     ByVal folderName As String) As Boolean
+    Dim baseName As String
+    If LCase$(Right$(folderName, 6)) <> "_files" Then Exit Function
+    baseName = Left$(folderName, Len(folderName) - 6)
+    If Len(baseName) = 0 Then Exit Function
+    IsWebResourceFolder = fso.FileExists(parentDir & baseName & ".htm") _
+                       Or fso.FileExists(parentDir & baseName & ".html")
+End Function
 
 ' FileDialog folder picker; returns "" when cancelled
 Private Function PickFolder() As String
