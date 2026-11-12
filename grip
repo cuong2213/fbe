@@ -1,0 +1,617 @@
+
+Option Explicit
+
+'=========================================================
+' GLOBAL VARIABLES
+'=========================================================
+
+Public gModel As String
+Public gRows As Long
+Public gCols As Long
+Public gSelectedCells As Object
+
+Private Const MAP_SHEET As String = "MAP_VEHICLE"
+Private Const MASTER_SHEET As String = "MASTER"
+Private Const DB_SHEET As String = "DATABASE"
+Private Const SUMMARY_SHEET As String = "SUMMARY"
+
+
+'=========================================================
+' COMMON FUNCTIONS
+'=========================================================
+
+Public Sub EnsureSelection()
+
+    If gSelectedCells Is Nothing Then
+        Set gSelectedCells = CreateObject("Scripting.Dictionary")
+    End If
+
+End Sub
+
+
+Public Function GetTable(ByVal sheetName As String, _
+                         ByVal tableName As String) As ListObject
+
+    On Error GoTo ErrHandler
+
+    Set GetTable = ThisWorkbook.Worksheets(sheetName) _
+                    .ListObjects(tableName)
+    Exit Function
+
+ErrHandler:
+    Set GetTable = Nothing
+
+End Function
+
+
+Public Function ColumnLetter(ByVal colNo As Long) As String
+
+    If colNo < 1 Then
+        ColumnLetter = ""
+        Exit Function
+    End If
+
+    ColumnLetter = Replace( _
+        ThisWorkbook.Worksheets(MAP_SHEET) _
+        .Cells(1, colNo).Address(False, False), "1", "")
+
+End Function
+
+
+Public Function NewID(ByVal prefix As String, _
+                      ByVal sequenceNo As Long) As String
+
+    NewID = prefix & Format(Now, "yyyymmddhhmmss") _
+            & Format(sequenceNo, "0000")
+
+End Function
+
+
+Public Function IsActiveValue(ByVal value As Variant) As Boolean
+
+    If IsError(value) Or IsEmpty(value) Then
+        IsActiveValue = False
+    Else
+        IsActiveValue = (UCase(Trim(CStr(value))) = "TRUE" _
+                         Or Trim(CStr(value)) = "1" _
+                         Or UCase(Trim(CStr(value))) = "YES")
+    End If
+
+End Function
+
+
+'=========================================================
+' GRID COORDINATE
+' Shape name: CELL_R5_C3
+' Row = 5, Column = 3
+'=========================================================
+
+Public Function GetGridCoordinates( _
+    ByVal shapeName As String, _
+    ByRef rowNo As Long, _
+    ByRef colNo As Long) As Boolean
+
+    Dim parts() As String
+
+    On Error GoTo ErrHandler
+
+    parts = Split(shapeName, "_")
+
+    If UBound(parts) <> 2 Then GoTo ErrHandler
+    If parts(0) <> "CELL" Then GoTo ErrHandler
+
+    rowNo = CLng(Mid$(parts(1), 2))
+    colNo = CLng(Mid$(parts(2), 2))
+
+    If rowNo < 1 Or colNo < 1 Then GoTo ErrHandler
+
+    GetGridCoordinates = True
+    Exit Function
+
+ErrHandler:
+    GetGridCoordinates = False
+
+End Function
+
+
+'=========================================================
+' LOAD VEHICLE MODEL
+'=========================================================
+
+Public Sub LoadVehicleModel()
+
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim lr As ListRow
+    Dim modelName As String
+    Dim imageName As String
+    Dim shp As Shape
+    Dim img As Shape
+    Dim foundModel As Boolean
+
+    Set ws = ThisWorkbook.Worksheets(MAP_SHEET)
+    Set lo = GetTable(MASTER_SHEET, "tblModels")
+
+    If lo Is Nothing Then
+        MsgBox "Cannot find tblModels.", vbCritical
+        Exit Sub
+    End If
+
+    modelName = Trim(CStr(ws.Range("B2").Value))
+
+    If modelName = "" Then
+        ClearSelection
+        DeleteGridShapes
+        Exit Sub
+    End If
+
+    foundModel = False
+    imageName = ""
+
+    For Each lr In lo.ListRows
+
+        If StrComp(Trim(CStr( _
+            lr.Range.Cells(1, lo.ListColumns("Model").Index).Value)), _
+            modelName, vbTextCompare) = 0 Then
+
+            If Not IsActiveValue( _
+                lr.Range.Cells(1, lo.ListColumns("Active").Index).Value) Then
+
+                MsgBox "This Model is inactive.", vbExclamation
+                Exit Sub
+            End If
+
+            gRows = CLng(lr.Range.Cells(1, _
+                     lo.ListColumns("Rows").Index).Value)
+
+            gCols = CLng(lr.Range.Cells(1, _
+                     lo.ListColumns("Cols").Index).Value)
+
+            imageName = Trim(CStr(lr.Range.Cells(1, _
+                         lo.ListColumns("ImageShapeName").Index).Value))
+
+            foundModel = True
+            Exit For
+
+        End If
+
+    Next lr
+
+    If Not foundModel Then
+        MsgBox "Model not found in tblModels: " & modelName, vbExclamation
+        Exit Sub
+    End If
+
+    If gRows <= 0 Or gCols <= 0 Then
+        MsgBox "Rows and Columns must be greater than zero.", vbCritical
+        Exit Sub
+    End If
+
+    Set img = Nothing
+
+    On Error Resume Next
+    Set img = ws.Shapes(imageName)
+    On Error GoTo 0
+
+    If img Is Nothing Then
+        MsgBox "Cannot find image: " & imageName, vbCritical
+        Exit Sub
+    End If
+
+    ClearSelection
+    DeleteGridShapes
+
+    ' Hide all Master images
+    For Each shp In ws.Shapes
+
+        If Left$(shp.Name, 4) = "IMG_" Then
+            shp.Visible = msoFalse
+        End If
+
+    Next shp
+
+    ' Show selected Model image
+    img.Visible = msoTrue
+
+    gModel = modelName
+
+    ws.Range("B4").Value = 0
+    ws.Range("B5").Value = gRows
+    ws.Range("B6").Value = gCols
+
+    CreateVehicleGrid
+
+End Sub
+
+
+'=========================================================
+' DELETE OLD GRID SHAPES
+'=========================================================
+
+Public Sub DeleteGridShapes()
+
+    Dim ws As Worksheet
+    Dim i As Long
+
+    Set ws = ThisWorkbook.Worksheets(MAP_SHEET)
+
+    For i = ws.Shapes.Count To 1 Step -1
+
+        If Left$(ws.Shapes(i).Name, 5) = "CELL_" Then
+            ws.Shapes(i).Delete
+        End If
+
+    Next i
+
+End Sub
+
+
+'=========================================================
+' CREATE UNIFORM GRID OVER MASTER IMAGE
+'=========================================================
+
+Public Sub CreateVehicleGrid()
+
+    Dim ws As Worksheet
+    Dim img As Shape
+    Dim cellShape As Shape
+    Dim imageName As String
+
+    Dim cellW As Double
+    Dim cellH As Double
+
+    Dim x As Double
+    Dim y As Double
+
+    Dim r As Long
+    Dim c As Long
+
+    Set ws = ThisWorkbook.Worksheets(MAP_SHEET)
+
+    EnsureSelection
+
+    imageName = ""
+
+    Dim lo As ListObject
+    Dim lr As ListRow
+
+    Set lo = GetTable(MASTER_SHEET, "tblModels")
+
+    For Each lr In lo.ListRows
+
+        If StrComp(Trim(CStr( _
+            lr.Range.Cells(1, lo.ListColumns("Model").Index).Value)), _
+            gModel, vbTextCompare) = 0 Then
+
+            imageName = CStr(lr.Range.Cells(1, _
+                         lo.ListColumns("ImageShapeName").Index).Value)
+            Exit For
+
+        End If
+
+    Next lr
+
+    If imageName = "" Then Exit Sub
+
+    Set img = ws.Shapes(imageName)
+
+    cellW = img.Width / gCols
+    cellH = img.Height / gRows
+
+    For r = 1 To gRows
+
+        For c = 1 To gCols
+
+            x = img.Left + (c - 1) * cellW
+            y = img.Top + (r - 1) * cellH
+
+            Set cellShape = ws.Shapes.AddShape( _
+                msoShapeRectangle, x, y, cellW, cellH)
+
+            With cellShape
+
+                .Name = "CELL_R" & r & "_C" & c
+
+                .Fill.Visible = msoTrue
+                .Fill.ForeColor.RGB = RGB(0, 176, 80)
+                .Fill.Transparency = 1
+
+                .Line.Visible = msoTrue
+                .Line.ForeColor.RGB = RGB(120, 120, 120)
+                .Line.Transparency = 0.7
+                .Line.Weight = 0.5
+
+                .Placement = xlFreeFloating
+
+                .OnAction = "'" & _
+                    Replace(ThisWorkbook.Name, "'", "''") & _
+                    "'!ToggleGridCell"
+
+            End With
+
+        Next c
+
+    Next r
+
+End Sub
+
+
+'=========================================================
+' CLICK GRID CELL - SELECT / DESELECT
+'=========================================================
+
+Public Sub ToggleGridCell()
+
+    Dim ws As Worksheet
+    Dim shapeName As String
+    Dim shp As Shape
+
+    Set ws = ThisWorkbook.Worksheets(MAP_SHEET)
+
+    EnsureSelection
+
+    shapeName = CStr(Application.Caller)
+    Set shp = ws.Shapes(shapeName)
+
+    If gSelectedCells.Exists(shapeName) Then
+
+        gSelectedCells.Remove shapeName
+        SetCellHighlight shapeName, False
+
+    Else
+
+        gSelectedCells.Add shapeName, True
+        SetCellHighlight shapeName, True
+
+    End If
+
+    ws.Range("B4").Value = gSelectedCells.Count
+
+End Sub
+
+
+'=========================================================
+' HIGHLIGHT SELECTED CELL
+'=========================================================
+
+Public Sub SetCellHighlight(ByVal shapeName As String, _
+                            ByVal selected As Boolean)
+
+    Dim ws As Worksheet
+    Dim shp As Shape
+
+    Set ws = ThisWorkbook.Worksheets(MAP_SHEET)
+    Set shp = ws.Shapes(shapeName)
+
+    If selected Then
+
+        shp.Fill.ForeColor.RGB = RGB(0, 176, 80)
+        shp.Fill.Transparency = 0.55
+
+    Else
+
+        shp.Fill.Transparency = 1
+
+    End If
+
+End Sub
+
+
+'=========================================================
+' CLEAR ALL SELECTED CELLS
+'=========================================================
+
+Public Sub ClearSelection()
+
+    Dim key As Variant
+
+    EnsureSelection
+
+    For Each key In gSelectedCells.Keys
+
+        On Error Resume Next
+        SetCellHighlight CStr(key), False
+        On Error GoTo 0
+
+    Next key
+
+    gSelectedCells.RemoveAll
+
+    ThisWorkbook.Worksheets(MAP_SHEET).Range("B4").Value = 0
+
+End Sub
+
+
+'=========================================================
+' OPEN DEFECT INPUT FORM
+'=========================================================
+
+Public Sub OpenDefectInput()
+
+    EnsureSelection
+
+    If gModel = "" Then
+        MsgBox "Please select a Model first.", vbExclamation
+        Exit Sub
+    End If
+
+    If gSelectedCells.Count = 0 Then
+        MsgBox "Please select at least one grid cell.", vbExclamation
+        Exit Sub
+    End If
+
+    frmDefectInput.Show
+
+End Sub
+
+
+'=========================================================
+' GET VIEW FROM GRID ZONE
+'=========================================================
+
+Public Function GetViewForCell( _
+    ByVal modelName As String, _
+    ByVal x As Long, _
+    ByVal y As Long) As String
+
+    Dim lo As ListObject
+    Dim lr As ListRow
+
+    Dim zoneModel As String
+    Dim zoneView As String
+
+    Dim xFrom As Long
+    Dim xTo As Long
+    Dim yFrom As Long
+    Dim yTo As Long
+
+    GetViewForCell = "MASTER"
+
+    Set lo = GetTable(MASTER_SHEET, "tblGridZones")
+
+    If lo Is Nothing Then Exit Function
+    If lo.DataBodyRange Is Nothing Then Exit Function
+
+    For Each lr In lo.ListRows
+
+        zoneModel = Trim(CStr(lr.Range.Cells(1, _
+                    lo.ListColumns("Model").Index).Value))
+
+        If StrComp(zoneModel, modelName, vbTextCompare) = 0 Then
+
+            zoneView = Trim(CStr(lr.Range.Cells(1, _
+                       lo.ListColumns("View").Index).Value))
+
+            xFrom = CLng(lr.Range.Cells(1, _
+                     lo.ListColumns("XFrom").Index).Value)
+
+            xTo = CLng(lr.Range.Cells(1, _
+                   lo.ListColumns("XTo").Index).Value)
+
+            yFrom = CLng(lr.Range.Cells(1, _
+                     lo.ListColumns("YFrom").Index).Value)
+
+            yTo = CLng(lr.Range.Cells(1, _
+                   lo.ListColumns("YTo").Index).Value)
+
+            If x >= xFrom And x <= xTo _
+               And y >= yFrom And y <= yTo Then
+
+                GetViewForCell = zoneView
+                Exit Function
+
+            End If
+
+        End If
+
+    Next lr
+
+End Function
+
+
+'=========================================================
+' REFRESH SUMMARY
+' Aggregate by Model + CellID + DefectType
+'=========================================================
+
+Public Sub RefreshSummary()
+
+    Dim loDB As ListObject
+    Dim loSummary As ListObject
+
+    Dim lr As ListRow
+    Dim newRow As ListRow
+
+    Dim dict As Object
+    Dim key As Variant
+    Dim arr As Variant
+
+    Dim modelName As String
+    Dim cellID As String
+    Dim defectType As String
+
+    Dim x As Long
+    Dim y As Long
+    Dim qty As Double
+
+    Dim i As Long
+
+    Set loDB = GetTable(DB_SHEET, "tblDefects")
+    Set loSummary = GetTable(SUMMARY_SHEET, "tblSummary")
+
+    If loDB Is Nothing Or loSummary Is Nothing Then
+        MsgBox "Cannot find Database or Summary table.", vbCritical
+        Exit Sub
+    End If
+
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    If Not loDB.DataBodyRange Is Nothing Then
+
+        For Each lr In loDB.ListRows
+
+            modelName = CStr(lr.Range.Cells(1, _
+                        loDB.ListColumns("Model").Index).Value)
+
+            cellID = CStr(lr.Range.Cells(1, _
+                     loDB.ListColumns("CellID").Index).Value)
+
+            x = CLng(lr.Range.Cells(1, _
+                loDB.ListColumns("X").Index).Value)
+
+            y = CLng(lr.Range.Cells(1, _
+                loDB.ListColumns("Y").Index).Value)
+
+            defectType = CStr(lr.Range.Cells(1, _
+                         loDB.ListColumns("DefectType").Index).Value)
+
+            qty = CDbl(lr.Range.Cells(1, _
+                  loDB.ListColumns("Qty").Index).Value)
+
+            key = modelName & "|" & cellID & "|" & defectType
+
+            If dict.Exists(key) Then
+
+                arr = dict(key)
+                arr(5) = CDbl(arr(5)) + qty
+                arr(6) = CLng(arr(6)) + 1
+                dict(key) = arr
+
+            Else
+
+                dict.Add key, Array( _
+                    modelName, cellID, x, y, defectType, qty, 1)
+
+            End If
+
+        Next lr
+
+    End If
+
+    ' Remove old Summary data
+    For i = loSummary.ListRows.Count To 1 Step -1
+        loSummary.ListRows(i).Delete
+    Next i
+
+    ' Write new Summary data
+    For Each key In dict.Keys
+
+        arr = dict(key)
+
+        Set newRow = loSummary.ListRows.Add
+
+        With newRow.Range
+
+            .Cells(1, loSummary.ListColumns("Model").Index).Value = arr(0)
+            .Cells(1, loSummary.ListColumns("CellID").Index).Value = arr(1)
+            .Cells(1, loSummary.ListColumns("X").Index).Value = arr(2)
+            .Cells(1, loSummary.ListColumns("Y").Index).Value = arr(3)
+            .Cells(1, loSummary.ListColumns("DefectType").Index).Value = arr(4)
+            .Cells(1, loSummary.ListColumns("TotalQty").Index).Value = arr(5)
+            .Cells(1, loSummary.ListColumns("RecordCount").Index).Value = arr(6)
+
+        End With
+
+    Next key
+
+End Sub
