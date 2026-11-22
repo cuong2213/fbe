@@ -1,0 +1,1450 @@
+﻿HUONG DAN + TOAN BO CODE: Dashboard Paint Shop (lich chon ngay, bieu do tron, bieu do ti le loi/xe,
+bieu do theo mau son, heatmap Top 3 vi tri tren hinh xe, o Paint Color khi nhap lieu)
+Ngay tao: 22/11/2026
+
+File nay du de ban TU COPY vao file Excel o cong ty (khong can gui file len). Lam theo dung thu tu.
+
+==============================================================================
+0. TONG QUAN - SE THAY DOI GI
+==============================================================================
+Khong tao module moi. Tat ca nam trong 5 cho co san:
+  [A] Module DU LIEU        - module chua Sub LoadAndAggregate   (file mau: Module3)  -> sua 6 cho nho
+  [B] Module HIEN THI       - module chua Sub UpdateCharts       (file mau: Module4)  -> sua 2 cho + dan them 1 khoi code lon
+  [C] Module CHINH          - module chua Sub InitializeDashboard (file mau: Module5) -> sua 5 cho (gom thay khoi lich)
+  [D] Code SHEET Dashboard  - double-click sheet "Dashboard" trong VBE                (file mau: Sheet8)   -> them 2 su kien
+  [E] Module NHAP LIEU      - module chua Sub SaveDefectRecords  (file mau: Module1)  -> sua 8 cho + dan them 1 khoi code
+  (Module chua Function DashSheet / NewDict / DefectColor (file mau: Module2) KHONG phai sua.)
+
+Ten module co the khac (Module1..5 hoac modVehicleMapping / modDashboard...). Hay nhan dien module theo TEN SUB
+ben trong (dung Ctrl+F "Find in Current Project"), khong theo ten module.
+
+Ket qua:
+  1. Bam vao o From date / To date tren Dashboard -> hien lich chon ngay (Shape, khong dung UserForm).
+  2. Bieu do tron ti le loi theo Defect Type, nhan dang "50% (12/24)".
+  3. Bieu do cot "Ti le loi / xe" theo ngay (cot: so loi + so xe; duong: ti le tren truc phu; nhan "50% (12/24)").
+  4. Bieu do thanh ngang "Ti le loi theo mau son xe" (mau thanh = mau son, nhan "50% (12/24)").
+  5. Heatmap: Top 3 vi tri loi tren hinh xe cho tung Defect Type, tung Model (bang Top 3 cu bi bo).
+  6. O "Paint Color" (MAP_VEHICLE!B8) + cot PaintColor trong tblDefects + bang mau MASTER > tblColors.
+
+==============================================================================
+1. CHUAN BI
+==============================================================================
+  1. Dong het Excel, COPY file .xlsm ra mot ban sao de lam thu (backup).
+  2. Mo file, bam Enable Content / Enable Macros. Bam Alt+F11 mo VBE.
+  3. Trong VBE: View > Project Explorer (Ctrl+R). Tim dung 5 cho [A][B][C][D][E] o tren.
+  4. Moi lan sua xong mot module nen bam Debug > Compile VBAProject de bat loi som.
+  5. QUY UOC: "TIM dong" = dong dang co trong code cu; "THAY BANG" = xoa dong do, dan noi dung moi;
+     "THEM SAU" = giu dong cu, dan them ngay duoi no. Giu nguyen thut le (4 dau cach / cap).
+  6. Phan code lon dan o cuoi file nay (muc PHU LUC / noi tung buoc) da la ban cuoi, copy NGUYEN KHOI.
+
+==============================================================================
+BUOC 1 - [A] MODULE DU LIEU (module co Sub LoadAndAggregate)
+==============================================================================
+
+1.1  Phan khai bao dau module: TIM dong
+       Public rMatrix As Object ...
+     THEM SAU 5 dong:
+
+------------------------------ BAT DAU CODE ------------------------------
+Public rDateQty As Object                  'ngay (serial) -> so loi
+Public rDateVin As Object                  'ngay (serial) -> tap VIN (so xe co loi)
+Public rColorQty As Object                 'mau son xe -> so loi
+Public rColorVin As Object                 'mau son xe -> tap VIN
+Public rHeat As Object                     'Model|loai loi|hang,cot (o Grid) -> so loi (cho Vehicle Heatmap)
+------------------------------ HET CODE ----------------------------------
+
+1.2  TIM dong khai bao cot Private:
+       Private cCell As Long, cX As Long, cY As Long, cQty As Long, cIns As Long, cDesc As Long
+     THAY BANG (them cColor o cuoi):
+
+------------------------------ BAT DAU CODE ------------------------------
+Private cCell As Long, cX As Long, cY As Long, cQty As Long, cIns As Long, cDesc As Long, cColor As Long
+------------------------------ HET CODE ----------------------------------
+
+1.3  TIM dong (trong Sub nap chi so cot, canh cac dong cDesc = ...):
+       cDesc = DashColIndex(lo, "Description", False)
+     THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+    cColor = DashColIndex(lo, "PaintColor", False)
+------------------------------ HET CODE ----------------------------------
+
+1.4  TIM dong trong Sub ResetResults:
+       Set rMatrix = NewDict()
+     THAY BANG:
+
+------------------------------ BAT DAU CODE ------------------------------
+    Set rMatrix = NewDict(): Set rHeat = NewDict()
+    Set rDateQty = NewDict(): Set rDateVin = NewDict(): Set rColorQty = NewDict(): Set rColorVin = NewDict()
+------------------------------ HET CODE ----------------------------------
+
+1.5  Trong Sub LoadAndAggregate: TIM dong khai bao
+       Dim sd As Long, sh As String, mdl As String, vn As String, df As String, cl As String, q As Double
+     THAY BANG (them pc o cuoi):
+
+------------------------------ BAT DAU CODE ------------------------------
+    Dim sd As Long, sh As String, mdl As String, vn As String, df As String, cl As String, q As Double, pc As String
+------------------------------ HET CODE ----------------------------------
+
+1.6  Trong vong lap, khoi "If sd >= fFrom And sd <= fTo Then ...":
+     (a) TIM dong  AddTo rDateShift, sd & "|" & sh, q   -> THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+            AddTo rDateQty, CStr(sd), q
+            AddNested rDateVin, CStr(sd), vn, 1
+            pc = ""
+            If cColor > 0 Then
+                If Not IsError(src(i, cColor)) Then pc = Trim$(CStr(src(i, cColor)))
+            End If
+            If Len(pc) = 0 Then pc = "(Chua ghi mau)"
+            AddTo rColorQty, pc, q
+            AddNested rColorVin, pc, vn, 1
+------------------------------ HET CODE ----------------------------------
+     (b) TIM dong  AddTo rMatrix, df & "|" & mdl, q   -> THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+            If Not IsError(src(i, cX)) And Not IsError(src(i, cY)) Then
+                If IsNumeric(src(i, cX)) And IsNumeric(src(i, cY)) Then
+                    If Not IsEmpty(src(i, cX)) And Not IsEmpty(src(i, cY)) Then
+                        AddTo rHeat, mdl & "|" & df & "|" & CLng(src(i, cY)) & "," & CLng(src(i, cX)), q
+                    End If
+                End If
+            End If
+------------------------------ HET CODE ----------------------------------
+
+==============================================================================
+BUOC 2 - [B] MODULE HIEN THI (module co Sub UpdateCharts)
+==============================================================================
+
+2.1  Ngay duoi dong "Option Explicit" o dau module, THEM cac hang so sau:
+
+------------------------------ BAT DAU CODE ------------------------------
+Private Const HM_FIRST_ROW As Long = 94          'hang dau tien cua vung Vehicle Heatmap (duoi tieu de hang 92 / ghi chu hang 93)
+Private Const HM_MAX_TYPES As Long = 10          'so Defect Type toi da ve tren heatmap
+Private Const HM_TITLE_H As Double = 16          'chieu cao thanh tieu de cua moi hinh xe
+Private Const HM_GAP As Double = 8
+Private Const PIE_MAX_SLICES As Long = 9         'so mien toi da cua bieu do tron (phan con lai gop thanh Others)
+------------------------------ HET CODE ----------------------------------
+
+2.2  Trong Sub UpdateCharts: TIM 2 dong sau va XOA CA 2 (bieu do Top 3 cu):
+       gDashStep = "bieu do Top 3 vi tri"
+       UpdateTop3Chart ws, calc
+     (Sub UpdateTop3Chart cu co the de nguyen, khong anh huong.)
+
+2.3  Xuong CUOI module, dan NGUYEN KHOI code sau (bieu do tron, heatmap, bieu do ti le loi/xe, bieu do theo mau).
+     Day la khoi lon nhat (~900 dong). Dan xong bam Debug > Compile VBAProject.
+
+------------------------------ BAT DAU CODE ------------------------------
+'=====================================================================
+' BIEU DO TRON - TI LE LOI THEO DEFECT TYPE (vi tri H45:N58, thay cho bieu do Top 3 cu)
+' Du lieu bieu do nam o sheet an DASH_CALC (cot AN:AO), mau lay tu Config > tblDefectColors
+'=====================================================================
+Public Sub DeleteLegacyChart(ByVal ws As Worksheet, ByVal nm As String)
+    On Error Resume Next
+    ws.ChartObjects(nm).Delete
+    On Error GoTo 0
+End Sub
+
+Private Function EnsurePieChart(ByVal ws As Worksheet) As ChartObject
+    Dim co As ChartObject, rng As Range
+    Set rng = ws.Range("H45:N58")
+    On Error Resume Next
+    Set co = ws.ChartObjects("chtDefectPie")
+    On Error GoTo 0
+    If co Is Nothing Then
+        Set co = ws.ChartObjects.Add(rng.Left + 2, rng.Top + 2, rng.Width - 4, rng.Height - 4)
+        co.Name = "chtDefectPie"
+        With co.Chart
+            .ChartType = xlPie
+            .HasTitle = True
+            .ChartTitle.Text = "DEFECT RATIO BY DEFECT TYPE (%)"
+            .ChartTitle.Font.Size = 11
+            .ChartTitle.Font.Bold = True
+        End With
+        On Error Resume Next
+        co.Chart.ChartArea.Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        co.Chart.ChartArea.Format.Line.ForeColor.RGB = RGB(200, 200, 200)
+        co.Chart.ChartArea.Font.Size = 9
+        On Error GoTo 0
+    Else
+        co.Left = rng.Left + 2: co.Top = rng.Top + 2
+        co.Width = rng.Width - 4: co.Height = rng.Height - 4
+    End If
+    co.Placement = xlMoveAndSize
+    Set EnsurePieChart = co
+End Function
+
+Public Sub CreatePieChart(ByVal ws As Worksheet)
+    Dim co As ChartObject
+    Set co = EnsurePieChart(ws)
+End Sub
+
+Public Sub UpdatePieChart()
+    Dim ws As Worksheet, calc As Worksheet, co As ChartObject, cht As Chart, s As Series
+    Dim ks() As String, vs() As Double, n As Long, m As Long, i As Long, nOut As Long
+    Dim others As Double, arr() As Variant, clr As Long
+    Const C0 As Long = 40
+    Set ws = DashSheet(SH_DASH)
+    Set calc = DashSheet(SH_CALC)
+    DeleteLegacyChart ws, "chtTop3"
+    Set co = EnsurePieChart(ws)
+    Set cht = co.Chart
+    ClearSeries cht
+    calc.Range(calc.Cells(1, C0), calc.Cells(40, C0 + 1)).ClearContents
+
+    n = SortDictKeys(rDefQty, ks, vs, True)
+    If n = 0 Then
+        co.Visible = False
+        Exit Sub
+    End If
+    co.Visible = True
+
+    If n > PIE_MAX_SLICES Then m = PIE_MAX_SLICES - 1 Else m = n
+    For i = m + 1 To n
+        others = others + vs(i)
+    Next i
+    nOut = m
+    If others > 0 Then nOut = m + 1
+    ReDim arr(1 To nOut + 1, 1 To 2)
+    arr(1, 1) = "Defect Type": arr(1, 2) = "Defects"
+    For i = 1 To m
+        arr(i + 1, 1) = ks(i): arr(i + 1, 2) = vs(i)
+    Next i
+    If others > 0 Then
+        arr(nOut + 1, 1) = "Others": arr(nOut + 1, 2) = others
+    End If
+    calc.Cells(1, C0).Resize(nOut + 1, 2).Value = arr
+
+    cht.ChartType = xlPie
+    Set s = cht.SeriesCollection.NewSeries
+    s.Name = "Defects"
+    s.XValues = calc.Range(calc.Cells(2, C0), calc.Cells(nOut + 1, C0))
+    s.Values = calc.Range(calc.Cells(2, C0 + 1), calc.Cells(nOut + 1, C0 + 1))
+    s.HasDataLabels = True
+    With s.DataLabels
+        .ShowPercentage = True
+        .ShowValue = False
+        .ShowCategoryName = False
+        .NumberFormat = "0.0%"
+        .Position = xlLabelPositionOutsideEnd
+        .Font.Size = 9
+    End With
+    For i = 1 To nOut
+        If i <= m Then clr = DefectColor(ks(i)) Else clr = RGB(166, 166, 166)
+        s.Points(i).Format.Fill.ForeColor.RGB = clr
+        If rTotal > 0 Then
+            s.Points(i).DataLabel.Text = CStr(Round(arr(i + 1, 2) / rTotal * 100, 1)) & "% (" & CStr(Round(arr(i + 1, 2), 2)) & "/" & CStr(Round(rTotal, 2)) & ")"
+        End If
+    Next i
+    cht.HasLegend = True
+    cht.Legend.Position = xlLegendPositionRight
+End Sub
+
+'=====================================================================
+' VEHICLE DEFECT HEATMAP - Top 3 vi tri loi (o Grid) cho tung Defect Type, tung Model
+' - Du lieu: rHeat (Model|DefectType|hang,cot -> so loi) do LoadAndAggregate tong hop theo bo loc Dashboard
+' - Hinh xe: hinh Master (tblModels > ImageShapeName) tren MAP_VEHICLE; Grid chia deu theo Rows x Cols cua Model,
+'   nen o (r, c) nam tai ((c - 0.5) / Cols, (r - 0.5) / Rows) cua hinh
+' - Bang Top 3 cu da bo; hang 60-75 dung cho bieu do ti le loi / xe
+'=====================================================================
+Public Sub UpdateHeatmap(ByVal showMsg As Boolean)
+    Dim ws As Worksheet, mdl As Object, grp As Object, nSkip As Long
+    Dim defs() As String, vsD() As Double, nAll As Long, nD As Long
+    Dim mods() As String, nM As Long, k As Variant
+    Dim availW As Double, availH As Double, legendH As Double, hmAvail As Double
+    Dim pics() As Shape, asp() As Double, perRow As Long, nTileRows As Long
+    Dim i As Long, tr As Long, tc As Long, tileW As Double, sumAsp As Double, mx As Double
+    Dim yRow() As Double, x As Double, y As Double
+    Dim info As Variant, s As Shape, pic As Shape, dd As Long, rr As Long
+    Dim t As Variant, key As String, occ As Object, n As Long, base As Double, sz As Double
+    Dim mx0 As Double, my0 As Double, rowN As Long, colN As Long, v As Double, clr As Long, tip As String
+
+    On Error GoTo EH
+    Set ws = DashSheet(SH_DASH)
+
+    availW = ws.Range("O1").Left - ws.Range("A1").Left - 8
+    availH = ws.Rows(ROW_DT_HDR - 1).Top - ws.Rows(HM_FIRST_ROW).Top - 6
+    If availH < 120 Then
+        If showMsg Then MsgBox "Vung Vehicle Heatmap qua thap (hang " & HM_FIRST_ROW & " den " & (ROW_DT_HDR - 2) & "). Hay tang ROW_DT_HDR.", vbExclamation, "Dashboard"
+        GoTo CLEANUP
+    End If
+
+    HmClearShapes ws
+    ws.Range("A93").Value = "So 1-2-3 = thu hang vi tri loi (o Grid) cua tung Defect Type, theo tung Model. Mau = Defect Type (Config). Re chuot len so de xem Cell ID."
+
+    If rHeat Is Nothing Then GoTo CLEANUP
+    HmDeleteStalePics ws, rModelQty
+    If rHeat.Count = 0 Or rModelQty.Count = 0 Then
+        ws.Range("A93").Value = "Khong co du lieu phu hop bo loc hien tai."
+        GoTo CLEANUP
+    End If
+
+    Set mdl = HmReadModels()
+    HmBuildTop3 mdl, grp, nSkip
+
+    'Defect Type theo tong giam dan (toi da HM_MAX_TYPES)
+    nAll = SortDictKeys(rDefQty, defs, vsD, True)
+    nD = nAll
+    If nD > HM_MAX_TYPES Then nD = HM_MAX_TYPES
+    If nD = 0 Then GoTo CLEANUP
+
+    'Danh sach Model co du lieu, theo thu tu tblModels
+    ReDim mods(1 To rModelQty.Count)
+    For Each k In mdl.Keys
+        If rModelQty.Exists(CStr(k)) Then
+            nM = nM + 1
+            mods(nM) = CStr(k)
+        End If
+    Next k
+    If nM = 0 Then
+        ws.Range("A93").Value = "Model trong du lieu khong co trong MASTER > tblModels nen khong ve duoc heatmap."
+        GoTo CLEANUP
+    End If
+
+    'Hinh nen cho tung Model
+    ReDim pics(1 To nM)
+    ReDim asp(1 To nM)
+    For i = 1 To nM
+        info = mdl(mods(i))
+        Set pics(i) = HmModelPicture(ws, mods(i), CStr(info(2)), showMsg)
+        If pics(i) Is Nothing Then
+            If showMsg Then MsgBox "Khong lay duoc hinh Master '" & CStr(info(2)) & "' cua Model " & mods(i) & ".", vbExclamation, "Dashboard"
+            asp(i) = 0.5
+        Else
+            asp(i) = pics(i).Height / pics(i).Width
+        End If
+    Next i
+
+    'Bo cuc: legend, roi cac o (tile) 1 hoac 2 cot
+    legendH = HmDrawLegend(ws, defs, nD, availW)
+    hmAvail = availH - legendH - 4
+    If nM = 1 Then perRow = 1 Else perRow = 2
+    nTileRows = (nM + perRow - 1) \ perRow
+    tileW = (availW - HM_GAP * (perRow - 1)) / perRow
+    ReDim yRow(0 To nTileRows - 1)
+    For tr = 0 To nTileRows - 1
+        mx = 0
+        For tc = 0 To perRow - 1
+            i = tr * perRow + tc + 1
+            If i <= nM Then
+                If asp(i) > mx Then mx = asp(i)
+            End If
+        Next tc
+        sumAsp = sumAsp + mx
+    Next tr
+    If tileW * sumAsp + nTileRows * HM_TITLE_H + HM_GAP * (nTileRows - 1) > hmAvail Then
+        tileW = (hmAvail - nTileRows * HM_TITLE_H - HM_GAP * (nTileRows - 1)) / sumAsp
+    End If
+    If tileW < 120 Then
+        If showMsg Then MsgBox "Vung Vehicle Heatmap qua thap cho " & nM & " Model. Hay tang ROW_DT_HDR.", vbExclamation, "Dashboard"
+        GoTo CLEANUP
+    End If
+
+    y = ws.Rows(HM_FIRST_ROW).Top + 2 + legendH + 4
+    For tr = 0 To nTileRows - 1
+        yRow(tr) = y
+        mx = 0
+        For tc = 0 To perRow - 1
+            i = tr * perRow + tc + 1
+            If i <= nM Then
+                If asp(i) > mx Then mx = asp(i)
+            End If
+        Next tc
+        y = y + HM_TITLE_H + tileW * mx + HM_GAP
+    Next tr
+
+    base = tileW / 45
+    If base < 11 Then base = 11
+    If base > 20 Then base = 20
+    Set occ = CreateObject("Scripting.Dictionary")
+
+    For i = 1 To nM
+        tr = (i - 1) \ perRow
+        tc = (i - 1) Mod perRow
+        x = ws.Range("A1").Left + 2 + tc * (tileW + HM_GAP)
+        info = mdl(mods(i))
+
+        'tieu de o
+        Set s = ws.Shapes.AddShape(msoShapeRectangle, x, yRow(tr), tileW, HM_TITLE_H)
+        With s
+            .Name = "HM_T_" & mods(i)
+            .Fill.ForeColor.RGB = RGB(31, 56, 100)
+            .Line.Visible = msoFalse
+            .Placement = xlMove
+            With .TextFrame2
+                .MarginLeft = 4: .MarginRight = 4: .MarginTop = 0: .MarginBottom = 0
+                .VerticalAnchor = msoAnchorMiddle
+                .WordWrap = msoFalse
+                .TextRange.Text = mods(i) & "  (" & info(0) & " x " & info(1) & ")  -  " & Format$(CDbl(rModelQty(mods(i))), "#,##0")
+                .TextRange.Font.Size = 9
+                .TextRange.Font.Bold = msoTrue
+                .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+                .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+            End With
+        End With
+
+        'hinh nen
+        Set pic = pics(i)
+        If Not pic Is Nothing Then
+            With pic
+                .LockAspectRatio = msoFalse
+                .Left = x
+                .Top = yRow(tr) + HM_TITLE_H
+                .Width = tileW
+                .Height = tileW * asp(i)
+                .Line.Visible = msoTrue
+                .Line.ForeColor.RGB = RGB(150, 150, 150)
+                .Line.Weight = 0.75
+            End With
+            mx0 = pic.Left: my0 = pic.Top
+
+            'marker Top 3 cho tung Defect Type
+            For dd = 1 To nD
+                key = mods(i) & "|" & defs(dd)
+                If grp.Exists(key) Then
+                    t = grp(key)
+                    clr = DefectColor(defs(dd))
+                    For rr = 1 To 3
+                        v = t(rr, 1)
+                        If v > 0 Then
+                            rowN = CLng(t(rr, 2)): colN = CLng(t(rr, 3))
+                            sz = base * (1 - 0.15 * (rr - 1))
+                            n = 0
+                            If occ.Exists(i & "|" & rowN & "," & colN) Then n = occ(i & "|" & rowN & "," & colN)
+                            occ(i & "|" & rowN & "," & colN) = n + 1
+                            Set s = ws.Shapes.AddShape(msoShapeOval, _
+                                    mx0 + (colN - 0.5) / CLng(info(1)) * pic.Width + n * sz * 0.45 - sz / 2, _
+                                    my0 + (rowN - 0.5) / CLng(info(0)) * pic.Height - sz / 2, sz, sz)
+                            tip = mods(i) & " - " & defs(dd) & " - hang " & rr & " - " & ColumnLetter(colN) & rowN & " (" & CStr(CLng(v)) & ")"
+                            HmStyleMarker s, "HM_M_" & i & "_" & dd & "_" & rr, CStr(rr), clr, tip, sz
+                        End If
+                    Next rr
+                End If
+            Next dd
+        End If
+    Next i
+
+    If nSkip > 0 Then
+        ws.Range("A93").Value = ws.Range("A93").Value & "  (Bo qua " & nSkip & " ban ghi ngoai Grid)"
+    End If
+CLEANUP:
+    Application.CutCopyMode = False
+    Exit Sub
+EH:
+    If showMsg Then MsgBox "Heatmap loi: " & Err.Description, vbExclamation, "Dashboard"
+    Resume CLEANUP
+End Sub
+
+'Model -> Array(Rows, Cols, ImageShapeName), thu tu theo MASTER > tblModels
+Private Function HmReadModels() As Object
+    Dim d As Object, lo As ListObject, dat As Variant, i As Long, nm As String
+    Dim cM As Long, cR As Long, cC As Long, cI As Long
+    Set d = NewDict()
+    Set lo = DashTable(SH_MASTER, TBL_MODELS)
+    If Not lo.DataBodyRange Is Nothing Then
+        cM = DashColIndex(lo, "Model")
+        cR = DashColIndex(lo, "Rows")
+        cC = DashColIndex(lo, "Cols")
+        cI = DashColIndex(lo, "ImageShapeName")
+        dat = lo.DataBodyRange.Value2
+        For i = 1 To UBound(dat, 1)
+            nm = Trim$(CStr(dat(i, cM)))
+            If Len(nm) > 0 And IsNumeric(dat(i, cR)) And IsNumeric(dat(i, cC)) Then
+                If CLng(dat(i, cR)) >= 1 And CLng(dat(i, cC)) >= 1 And Not d.Exists(nm) Then
+                    d.Add nm, Array(CLng(dat(i, cR)), CLng(dat(i, cC)), Trim$(CStr(dat(i, cI))))
+                End If
+            End If
+        Next i
+    End If
+    Set HmReadModels = d
+End Function
+
+'grp("Model|DefectType") = mang 3x3: (hang thu, 1 = so loi / 2 = hang Grid / 3 = cot Grid)
+Private Sub HmBuildTop3(ByVal mdl As Object, ByRef grp As Object, ByRef nSkip As Long)
+    Dim k As Variant, p() As String, rc() As String, gk As String
+    Dim r As Long, c As Long, v As Double, info As Variant
+    Dim t As Variant, blank(1 To 3, 1 To 3) As Double
+    Set grp = NewDict()
+    nSkip = 0
+    For Each k In rHeat.Keys
+        p = Split(CStr(k), "|")
+        If UBound(p) = 2 Then
+            If mdl.Exists(p(0)) Then
+                rc = Split(p(2), ",")
+                r = CLng(rc(0)): c = CLng(rc(1))
+                info = mdl(p(0))
+                If r < 1 Or r > CLng(info(0)) Or c < 1 Or c > CLng(info(1)) Then
+                    nSkip = nSkip + 1
+                Else
+                    v = CDbl(rHeat(k))
+                    gk = p(0) & "|" & p(1)
+                    If grp.Exists(gk) Then
+                        t = grp(gk)
+                    Else
+                        Erase blank
+                        t = blank
+                    End If
+                    HmInsertTop3 t, v, r, c
+                    grp(gk) = t
+                End If
+            End If
+        End If
+    Next k
+End Sub
+
+Private Sub HmInsertTop3(ByRef t As Variant, ByVal v As Double, ByVal r As Long, ByVal c As Long)
+    Dim p As Long, q As Long
+    For p = 1 To 3
+        If v > t(p, 1) Then
+            For q = 3 To p + 1 Step -1
+                t(q, 1) = t(q - 1, 1): t(q, 2) = t(q - 1, 2): t(q, 3) = t(q - 1, 3)
+            Next q
+            t(p, 1) = v: t(p, 2) = r: t(p, 3) = c
+            Exit Sub
+        End If
+    Next p
+End Sub
+
+Private Function HmFindShape(ByVal ws As Worksheet, ByVal nm As String) As Shape
+    On Error Resume Next
+    Set HmFindShape = ws.Shapes(nm)
+    On Error GoTo 0
+End Function
+
+'Uu tien hinh that; hinh tam (AutoShape) chi dung khi chua co hinh that
+Private Function HmFindImage(ByVal wm As Worksheet, ByVal nm As String) As Shape
+    Dim s As Shape, temp As Shape
+    For Each s In wm.Shapes
+        If StrComp(s.Name, nm, vbTextCompare) = 0 Then
+            If s.Type = msoAutoShape Then
+                If temp Is Nothing Then Set temp = s
+            Else
+                Set HmFindImage = s
+                Exit Function
+            End If
+        End If
+    Next s
+    Set HmFindImage = temp
+End Function
+
+'Copy hinh Master cua Model vao Dashboard (tam bat hien thi neu dang an, roi tra lai nhu cu).
+'Chi copy lai khi force = True (nut REFRESH) hoac chua co hinh.
+Private Function HmModelPicture(ByVal ws As Worksheet, ByVal model As String, ByVal imgName As String, _
+                                ByVal force As Boolean) As Shape
+    Dim nm As String, s As Shape, src As Shape, wm As Worksheet, wasVis As Boolean
+    Dim tries As Long, ok As Boolean
+    nm = "HM_PIC_" & model
+    Set s = HmFindShape(ws, nm)
+    If Not s Is Nothing Then
+        If Not force Then
+            Set HmModelPicture = s
+            Exit Function
+        End If
+        s.Delete
+        Set s = Nothing
+    End If
+    If Len(imgName) = 0 Then Exit Function
+    Set wm = DashSheet(SH_MAP)
+    Set src = HmFindImage(wm, imgName)
+    If src Is Nothing Then Exit Function
+
+    wasVis = (src.Visible = msoTrue)
+    If Not wasVis Then src.Visible = msoTrue
+    For tries = 1 To 3
+        On Error Resume Next
+        Err.Clear
+        src.Copy
+        If Err.Number = 0 Then ws.Paste Destination:=ws.Range("A" & HM_FIRST_ROW)
+        ok = (Err.Number = 0)
+        On Error GoTo 0
+        If ok Then Exit For
+        DoEvents
+    Next tries
+    On Error Resume Next
+    If Not wasVis Then src.Visible = msoFalse
+    On Error GoTo 0
+    If Not ok Then Exit Function
+
+    Set s = ws.Shapes(ws.Shapes.Count)
+    s.Name = nm
+    s.Placement = xlMove
+    Set HmModelPicture = s
+End Function
+
+'Xoa marker / tieu de / legend (giu hinh nen da copy)
+Private Sub HmClearShapes(ByVal ws As Worksheet)
+    Dim i As Long, nm As String
+    For i = ws.Shapes.Count To 1 Step -1
+        nm = ws.Shapes(i).Name
+        If Left$(nm, 5) = "HM_M_" Or Left$(nm, 5) = "HM_T_" Or Left$(nm, 5) = "HM_L_" Then ws.Shapes(i).Delete
+    Next i
+End Sub
+
+'Xoa hinh nen cua Model khong con hien thi
+Private Sub HmDeleteStalePics(ByVal ws As Worksheet, ByVal keep As Object)
+    Dim i As Long, nm As String
+    For i = ws.Shapes.Count To 1 Step -1
+        nm = ws.Shapes(i).Name
+        If Left$(nm, 7) = "HM_PIC_" Then
+            If Not keep.Exists(Mid$(nm, 8)) Then ws.Shapes(i).Delete
+        End If
+    Next i
+End Sub
+
+Private Function HmDrawLegend(ByVal ws As Worksheet, ByRef defs() As String, ByVal nD As Long, _
+                              ByVal availW As Double) As Double
+    Dim i As Long, x As Double, y As Double, w As Double, x0 As Double, y0 As Double
+    Dim clr As Long, s As Shape
+    x0 = ws.Range("A1").Left + 2
+    y0 = ws.Rows(HM_FIRST_ROW).Top + 2
+    x = x0: y = y0
+    For i = 1 To nD
+        w = Len(defs(i)) * 5.6 + 18
+        If w < 44 Then w = 44
+        If x + w > x0 + availW And x > x0 Then
+            x = x0
+            y = y + 18
+        End If
+        clr = DefectColor(defs(i))
+        Set s = ws.Shapes.AddShape(msoShapeRoundedRectangle, x, y, w, 15)
+        With s
+            .Name = "HM_L_" & i
+            .Fill.ForeColor.RGB = clr
+            .Line.Visible = msoFalse
+            .Placement = xlMove
+            With .TextFrame2
+                .MarginLeft = 2: .MarginRight = 2: .MarginTop = 0: .MarginBottom = 0
+                .VerticalAnchor = msoAnchorMiddle
+                .WordWrap = msoFalse
+                .TextRange.Text = defs(i)
+                .TextRange.Font.Size = 8
+                .TextRange.Font.Bold = msoTrue
+                .TextRange.Font.Fill.ForeColor.RGB = HmTextColor(clr)
+                .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+            End With
+        End With
+        x = x + w + 6
+    Next i
+    HmDrawLegend = (y - y0) + 15
+End Function
+
+Private Sub HmStyleMarker(ByVal s As Shape, ByVal nm As String, ByVal txt As String, _
+                          ByVal clr As Long, ByVal tip As String, ByVal sz As Double)
+    With s
+        .Name = nm
+        .Fill.ForeColor.RGB = clr
+        .Line.ForeColor.RGB = RGB(255, 255, 255)
+        .Line.Weight = 1.25
+        .Placement = xlMove
+        .AlternativeText = tip
+        With .TextFrame2
+            .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
+            .VerticalAnchor = msoAnchorMiddle
+            .WordWrap = msoFalse
+            With .TextRange
+                .Text = txt
+                .Font.Size = IIf(sz >= 14, 9, 8)
+                .Font.Bold = msoTrue
+                .Font.Fill.ForeColor.RGB = HmTextColor(clr)
+                .ParagraphFormat.Alignment = msoAlignCenter
+            End With
+        End With
+    End With
+End Sub
+
+Private Function HmTextColor(ByVal clr As Long) As Long
+    Dim lum As Double
+    lum = 0.299 * (clr And 255) + 0.587 * ((clr \ 256) And 255) + 0.114 * ((clr \ 65536) And 255)
+    If lum > 150 Then HmTextColor = RGB(0, 0, 0) Else HmTextColor = RGB(255, 255, 255)
+End Function
+
+'=====================================================================
+' BIEU DO TI LE LOI / XE THEO NGAY (A60:J74, thay cho bang Top 3 cu)
+' Ti le = Tong loi / Tong xe trong ngay (xe = so VIN khac nhau co loi). Cot: so loi va so xe; duong: ti le (truc phu).
+' Nhan hien dang "50% (12/24)". Du lieu bieu do o sheet an DASH_CALC (cot AQ:AT).
+'=====================================================================
+Public Sub ClearChartBand(ByVal ws As Worksheet)
+    Dim rg As Range
+    ws.Rows("60:75").Hidden = False
+    If Len(CStr(ws.Range("A60").Value)) > 0 Or Len(CStr(ws.Range("H60").Value)) > 0 Or Len(CStr(ws.Range("A61").Value)) > 0 Then
+        Set rg = ws.Range("A60:N75")
+        rg.Clear
+        rg.Interior.Color = RGB(242, 244, 247)
+        rg.Font.Name = "Segoe UI"
+        rg.Font.Size = 10
+        ws.Rows("60:75").RowHeight = 16
+    End If
+End Sub
+
+Private Function EnsureRateChart(ByVal ws As Worksheet) As ChartObject
+    Dim co As ChartObject, rng As Range
+    Set rng = ws.Range("A60:J74")
+    On Error Resume Next
+    Set co = ws.ChartObjects("chtRatePerVehicle")
+    On Error GoTo 0
+    If co Is Nothing Then
+        Set co = ws.ChartObjects.Add(rng.Left + 2, rng.Top + 2, rng.Width - 4, rng.Height - 4)
+        co.Name = "chtRatePerVehicle"
+        With co.Chart
+            .ChartType = xlColumnClustered
+            .HasTitle = True
+            .ChartTitle.Text = "DEFECT RATE PER VEHICLE"
+            .ChartTitle.Font.Size = 11
+            .ChartTitle.Font.Bold = True
+        End With
+        On Error Resume Next
+        co.Chart.ChartArea.Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        co.Chart.ChartArea.Format.Line.ForeColor.RGB = RGB(200, 200, 200)
+        co.Chart.ChartArea.Font.Size = 9
+        On Error GoTo 0
+    Else
+        co.Left = rng.Left + 2: co.Top = rng.Top + 2
+        co.Width = rng.Width - 4: co.Height = rng.Height - 4
+    End If
+    co.Placement = xlMoveAndSize
+    Set EnsureRateChart = co
+End Function
+
+Public Sub CreateRateChart(ByVal ws As Worksheet)
+    Dim co As ChartObject
+    ClearChartBand ws
+    Set co = EnsureRateChart(ws)
+End Sub
+
+Public Sub UpdateRateChart()
+    Dim ws As Worksheet, calc As Worksheet, co As ChartObject, cht As Chart
+    Dim s1 As Series, s2 As Series, s3 As Series
+    Dim dts() As Long, n As Long, i As Long, j As Long, k As Variant, tmp As Long
+    Dim arr() As Variant, dft As Double, veh As Long, rate As Double, pct As Double
+    Dim totRate As Double, totVeh As Long
+    Const C0 As Long = 43
+
+    Set ws = DashSheet(SH_DASH)
+    Set calc = DashSheet(SH_CALC)
+    ClearChartBand ws
+    Set co = EnsureRateChart(ws)
+    Set cht = co.Chart
+    ClearSeries cht
+    calc.Range(calc.Cells(1, C0), calc.Cells(400, C0 + 3)).ClearContents
+    calc.Range(calc.Cells(1, C0), calc.Cells(400, C0)).NumberFormat = "@"
+
+    n = rDateQty.Count
+    If n = 0 Then
+        co.Visible = False
+        Exit Sub
+    End If
+    co.Visible = True
+    If n > 366 Then n = 366
+
+    ReDim dts(1 To rDateQty.Count)
+    i = 0
+    For Each k In rDateQty.Keys
+        i = i + 1
+        dts(i) = CLng(k)
+    Next k
+    n = i
+    For i = 1 To n - 1
+        For j = i + 1 To n
+            If dts(j) < dts(i) Then
+                tmp = dts(i): dts(i) = dts(j): dts(j) = tmp
+            End If
+        Next j
+    Next i
+    If n > 366 Then n = 366
+
+    ReDim arr(1 To n + 1, 1 To 4)
+    arr(1, 1) = "Date": arr(1, 2) = "Defects": arr(1, 3) = "Vehicles": arr(1, 4) = "Defect rate"
+    For i = 1 To n
+        dft = CDbl(rDateQty(CStr(dts(i))))
+        veh = 0
+        If rDateVin.Exists(CStr(dts(i))) Then veh = rDateVin(CStr(dts(i))).Count
+        If veh > 0 Then rate = dft / veh Else rate = 0
+        arr(i + 1, 1) = Format$(CDate(dts(i)), "dd/mm")
+        arr(i + 1, 2) = dft
+        arr(i + 1, 3) = veh
+        arr(i + 1, 4) = rate
+    Next i
+    calc.Cells(1, C0).Resize(n + 1, 4).Value = arr
+
+    cht.ChartType = xlColumnClustered
+    Set s1 = cht.SeriesCollection.NewSeries
+    s1.Name = "So loi (Defects)"
+    s1.XValues = calc.Range(calc.Cells(2, C0), calc.Cells(n + 1, C0))
+    s1.Values = calc.Range(calc.Cells(2, C0 + 1), calc.Cells(n + 1, C0 + 1))
+    s1.Format.Fill.ForeColor.RGB = RGB(192, 57, 43)
+    s1.HasDataLabels = True
+    s1.DataLabels.Font.Size = 8
+    Set s2 = cht.SeriesCollection.NewSeries
+    s2.Name = "So xe (Vehicles)"
+    s2.XValues = calc.Range(calc.Cells(2, C0), calc.Cells(n + 1, C0))
+    s2.Values = calc.Range(calc.Cells(2, C0 + 2), calc.Cells(n + 1, C0 + 2))
+    s2.Format.Fill.ForeColor.RGB = RGB(31, 119, 180)
+    s2.HasDataLabels = True
+    s2.DataLabels.Font.Size = 8
+    Set s3 = cht.SeriesCollection.NewSeries
+    s3.Name = "Ti le loi / xe"
+    s3.XValues = calc.Range(calc.Cells(2, C0), calc.Cells(n + 1, C0))
+    s3.Values = calc.Range(calc.Cells(2, C0 + 3), calc.Cells(n + 1, C0 + 3))
+    s3.ChartType = xlLineMarkers
+    s3.AxisGroup = xlSecondary
+    s3.Format.Line.ForeColor.RGB = RGB(255, 140, 0)
+    s3.Format.Line.Weight = 2.25
+    s3.MarkerStyle = xlMarkerStyleCircle
+    s3.MarkerSize = 6
+    s3.MarkerBackgroundColor = RGB(255, 140, 0)
+    s3.MarkerForegroundColor = RGB(255, 140, 0)
+    s3.HasDataLabels = True
+    For i = 1 To n
+        dft = arr(i + 1, 2): veh = CLng(arr(i + 1, 3)): rate = arr(i + 1, 4)
+        pct = Round(rate * 100, 1)
+        With s3.Points(i).DataLabel
+            .Text = CStr(pct) & "% (" & CStr(Round(dft, 2)) & "/" & CStr(veh) & ")"
+            .Position = xlLabelPositionAbove
+            .Font.Size = 8
+            .Font.Bold = True
+            .Font.Color = RGB(200, 90, 0)
+        End With
+    Next i
+
+    On Error Resume Next
+    cht.Axes(xlValue, xlSecondary).TickLabels.NumberFormat = "0%"
+    cht.Axes(xlValue, xlSecondary).HasTitle = True
+    cht.Axes(xlValue, xlSecondary).AxisTitle.Text = "Ti le loi / xe"
+    cht.Axes(xlValue, xlPrimary).HasTitle = True
+    cht.Axes(xlValue, xlPrimary).AxisTitle.Text = "So luong"
+    On Error GoTo 0
+
+    totVeh = rVin.Count
+    If totVeh > 0 Then totRate = rTotal / totVeh Else totRate = 0
+    cht.HasTitle = True
+    cht.ChartTitle.Text = "DEFECT RATE PER VEHICLE  |  Total: " & CStr(Round(totRate * 100, 1)) & "% (" & CStr(Round(rTotal, 2)) & "/" & CStr(totVeh) & ")"
+    cht.HasLegend = True
+    cht.Legend.Position = xlLegendPositionBottom
+End Sub
+
+'=====================================================================
+' BIEU DO TI LE LOI THEO MAU SON XE (K60:N74): thanh ngang to dung mau son, nhan "50% (12/24)" = % tong loi (loi cua mau / tong loi)
+' Mau son xe ghi o MAP_VEHICLE!B8 -> tblDefects[PaintColor]; ma mau (Hex) lay tu MASTER > tblColors. Du lieu bieu do o DASH_CALC (cot AV:AX).
+'=====================================================================
+Private Function EnsureColorChart(ByVal ws As Worksheet) As ChartObject
+    Dim co As ChartObject, rng As Range
+    Set rng = ws.Range("K60:N74")
+    On Error Resume Next
+    Set co = ws.ChartObjects("chtByPaintColor")
+    On Error GoTo 0
+    If co Is Nothing Then
+        Set co = ws.ChartObjects.Add(rng.Left + 2, rng.Top + 2, rng.Width - 4, rng.Height - 4)
+        co.Name = "chtByPaintColor"
+        With co.Chart
+            .ChartType = xlBarClustered
+            .HasTitle = True
+            .ChartTitle.Text = "DEFECT RATIO BY PAINT COLOR"
+            .ChartTitle.Font.Size = 11
+            .ChartTitle.Font.Bold = True
+            .HasLegend = False
+        End With
+        On Error Resume Next
+        co.Chart.ChartArea.Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        co.Chart.ChartArea.Format.Line.ForeColor.RGB = RGB(200, 200, 200)
+        co.Chart.ChartArea.Font.Size = 9
+        On Error GoTo 0
+    Else
+        co.Left = rng.Left + 2: co.Top = rng.Top + 2
+        co.Width = rng.Width - 4: co.Height = rng.Height - 4
+    End If
+    co.Placement = xlMoveAndSize
+    Set EnsureColorChart = co
+End Function
+
+Public Sub CreateColorChart(ByVal ws As Worksheet)
+    Dim co As ChartObject
+    Set co = EnsureColorChart(ws)
+End Sub
+
+'Mau to cot = ma Hex trong MASTER > tblColors (khong co -> xam)
+Private Function PaintRGB(ByVal colorName As String) As Long
+    Dim lo As ListObject, i As Long, dat As Variant, h As String
+    PaintRGB = RGB(166, 166, 166)
+    On Error GoTo Done
+    Set lo = DashTable(SH_MASTER, TBL_COLORS)
+    If lo.DataBodyRange Is Nothing Then Exit Function
+    dat = lo.DataBodyRange.Value2
+    For i = 1 To UBound(dat, 1)
+        If StrComp(Trim$(CStr(dat(i, 1))), colorName, vbTextCompare) = 0 Then
+            h = Replace(Trim$(CStr(dat(i, 2))), "#", "")
+            If Len(h) = 6 Then
+                PaintRGB = RGB(CLng("&H" & Mid$(h, 1, 2)), CLng("&H" & Mid$(h, 3, 2)), CLng("&H" & Mid$(h, 5, 2)))
+            End If
+            Exit Function
+        End If
+    Next i
+Done:
+End Function
+
+Public Sub UpdateColorChart()
+    Dim ws As Worksheet, calc As Worksheet, co As ChartObject, cht As Chart, s As Series
+    Dim ks() As String, vs() As Double, n As Long, i As Long, arr() As Variant, veh As Long
+    Const C0 As Long = 48
+
+    Set ws = DashSheet(SH_DASH)
+    Set calc = DashSheet(SH_CALC)
+    ClearChartBand ws
+    Set co = EnsureColorChart(ws)
+    Set cht = co.Chart
+    ClearSeries cht
+    calc.Range(calc.Cells(1, C0), calc.Cells(60, C0 + 2)).ClearContents
+
+    n = SortDictKeys(rColorQty, ks, vs, True)
+    If n = 0 Then
+        co.Visible = False
+        Exit Sub
+    End If
+    co.Visible = True
+    If n > 15 Then n = 15
+
+    ReDim arr(1 To n + 1, 1 To 3)
+    arr(1, 1) = "Paint color": arr(1, 2) = "Defects": arr(1, 3) = "Vehicles"
+    For i = 1 To n
+        veh = 0
+        If rColorVin.Exists(ks(i)) Then veh = rColorVin(ks(i)).Count
+        arr(i + 1, 1) = ks(i): arr(i + 1, 2) = vs(i): arr(i + 1, 3) = veh
+    Next i
+    calc.Cells(1, C0).Resize(n + 1, 3).Value = arr
+
+    cht.ChartType = xlBarClustered
+    Set s = cht.SeriesCollection.NewSeries
+    s.Name = "Defects"
+    s.XValues = calc.Range(calc.Cells(2, C0), calc.Cells(n + 1, C0))
+    s.Values = calc.Range(calc.Cells(2, C0 + 1), calc.Cells(n + 1, C0 + 1))
+    s.HasDataLabels = True
+    For i = 1 To n
+        With s.Points(i)
+            .Format.Fill.ForeColor.RGB = PaintRGB(ks(i))
+            .Format.Line.Visible = msoTrue
+            .Format.Line.ForeColor.RGB = RGB(120, 120, 120)
+            .Format.Line.Weight = 0.75
+            If rTotal > 0 Then
+                .DataLabel.Text = CStr(Round(vs(i) / rTotal * 100, 1)) & "% (" & CStr(Round(vs(i), 2)) & "/" & CStr(Round(rTotal, 2)) & ")"
+            End If
+            .DataLabel.Position = xlLabelPositionOutsideEnd
+            .DataLabel.Font.Size = 8
+        End With
+    Next i
+    On Error Resume Next
+    cht.Axes(xlCategory).ReversePlotOrder = True
+    cht.Axes(xlValue).HasMajorGridlines = False
+    On Error GoTo 0
+    cht.HasLegend = False
+    cht.HasTitle = True
+    cht.ChartTitle.Text = "DEFECT RATIO BY PAINT COLOR"
+End Sub
+------------------------------ HET CODE ----------------------------------
+
+==============================================================================
+BUOC 3 - [C] MODULE CHINH (module co Sub InitializeDashboard / RunDashboard)
+==============================================================================
+
+3.1  Ngay duoi dong "Option Explicit" o dau module, THEM:
+
+------------------------------ BAT DAU CODE ------------------------------
+Private mDcYear As Long                  'lich chon ngay (Shape): nam / thang dang hien, o dich (A5 hoac C5)
+Private mDcMonth As Long
+Private mDcTarget As String
+------------------------------ HET CODE ----------------------------------
+
+3.2  Trong Function RunDashboard: TIM 2 dong sau va XOA (bang Top 3 cu khong con dung):
+       gDashStep = "Top 3 vi tri"
+       UpdateTop3Tables
+     Sau do TIM dong   UpdateCharts   (ngay truoc gDashStep = "tieu de / trang thai") va THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+    gDashStep = "bieu do tron ti le loi"
+    UpdatePieChart
+    gDashStep = "bieu do ti le loi / xe"
+    UpdateRateChart
+    gDashStep = "bieu do theo mau son"
+    UpdateColorChart
+    gDashStep = "heatmap xe"
+    UpdateHeatmap showMsg
+------------------------------ HET CODE ----------------------------------
+
+3.3  Trong Sub CreateCharts: TIM dong (bieu do Top 3 cu):
+       EnsureChart ws, "chtTop3", ws.Range("H45:N58"), xlBarClustered, "TOP 3 DEFECT LOCATIONS (CELL ID)"
+     THAY BANG:
+
+------------------------------ BAT DAU CODE ------------------------------
+    DeleteLegacyChart ws, "chtTop3"
+    CreatePieChart ws
+    CreateRateChart ws
+    CreateColorChart ws
+------------------------------ HET CODE ----------------------------------
+
+3.4  Trong Sub BuildDashboardLayout: XOA ca khoi "Top 3" tu dong comment
+       '--- Top 3 vi tri theo Model / Defect Type ---
+     den HET dong ngay truoc dong comment
+       '--- Ma tran Defect Type x Model ---
+     (xoa TitleBar "TOP 3 DEFECT LOCATIONS BY MODEL", HeaderRow..., vong For Each f In Array("A","H") ... Next f).
+     Thay bang 2 dong:
+
+------------------------------ BAT DAU CODE ------------------------------
+    '--- Vung bieu do ti le loi / xe (hang 60-75): bang Top 3 cu da bo ---
+    ClearChartBand ws
+------------------------------ HET CODE ----------------------------------
+
+3.5  CUOI module: neu co khoi lich cu dang do (comment "VBA CALENDAR POPUP", cac Sub ShowDashboardCalendar,
+     DrawDashboardCalendar, ..., va dong Public gCalendarTarget / gCalendarMonth khai bao SAU cac Sub) thi XOA HET khoi do.
+     Sau do dan NGUYEN KHOI lich moi nay xuong cuoi module:
+
+------------------------------ BAT DAU CODE ------------------------------
+'=====================================================================
+' LICH CHON NGAY CHO BO LOC From date / To date (Shape tren sheet, KHONG dung UserForm)
+' Bam vao o From (A5) hoac To (C5) -> hien lich; chon ngay -> ghi vao o va Dashboard tu cap nhat.
+' Su kien Worksheet_SelectionChange / Worksheet_Deactivate cua sheet Dashboard goi DashCalOnSelection / DashCalHide.
+'=====================================================================
+Public Sub DashCalOnSelection(ByVal Target As Range)
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = Target.Worksheet
+    If Target.Cells.Count > 2 Then
+        DashCalHide ws
+        Exit Sub
+    End If
+    If Not Intersect(Target, ws.Range(F_FROM).MergeArea) Is Nothing Then
+        DashCalShow ws, F_FROM
+    ElseIf Not Intersect(Target, ws.Range(F_TO).MergeArea) Is Nothing Then
+        DashCalShow ws, F_TO
+    Else
+        DashCalHide ws
+    End If
+End Sub
+
+Public Sub DashCalHide(ByVal ws As Worksheet)
+    Dim s As Shape
+    On Error Resume Next
+    If Not DashCalShapeExists(ws, "CAL_BG") Then Exit Sub
+    If ws.Shapes("CAL_BG").Visible = msoFalse Then Exit Sub
+    For Each s In ws.Shapes
+        If Left$(s.Name, 4) = "CAL_" Then s.Visible = msoFalse
+    Next s
+End Sub
+
+Private Function DashCalShapeExists(ByVal ws As Worksheet, ByVal nm As String) As Boolean
+    Dim s As Shape
+    On Error Resume Next
+    Set s = ws.Shapes(nm)
+    DashCalShapeExists = Not s Is Nothing
+End Function
+
+Private Sub DashCalShow(ByVal ws As Worksheet, ByVal addr As String)
+    Dim v As Variant, L As Single, T As Single, i As Long, prevSU As Boolean
+    prevSU = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    mDcTarget = addr
+    v = ws.Range(addr).Value
+    If IsDate(v) Then
+        mDcYear = Year(CDate(v)): mDcMonth = Month(CDate(v))
+    Else
+        mDcYear = Year(Date): mDcMonth = Month(Date)
+    End If
+    DashCalBuild ws
+    L = ws.Range(addr).Left
+    T = ws.Rows(7).Top                                  'ngay duoi vung freeze (hang 1-6)
+    On Error Resume Next
+    T = ActiveWindow.Panes(2).VisibleRange.Top
+    On Error GoTo 0
+    DashCalLayout ws, L, T
+    ws.Shapes("CAL_BG").Visible = msoTrue
+    ws.Shapes("CAL_TITLE").Visible = msoTrue
+    ws.Shapes("CAL_PREV").Visible = msoTrue
+    ws.Shapes("CAL_NEXT").Visible = msoTrue
+    ws.Shapes("CAL_TODAY").Visible = msoTrue
+    For i = 1 To 7
+        ws.Shapes("CAL_W" & i).Visible = msoTrue
+    Next i
+    DashCalDraw ws
+    Application.ScreenUpdating = prevSU
+End Sub
+
+Private Function DashCalBox(ByVal ws As Worksheet, ByVal nm As String, ByVal txt As String, _
+                            ByVal fillClr As Long, ByVal fontClr As Long, ByVal sz As Single, _
+                            ByVal isBold As Boolean, ByVal macroName As String) As Shape
+    Dim s As Shape
+    Set s = ws.Shapes.AddShape(msoShapeRectangle, 0, 0, 26, 20)
+    With s
+        .Name = nm
+        .Fill.ForeColor.RGB = fillClr
+        .Line.Visible = msoFalse
+        .Placement = xlFreeFloating
+        .OnAction = macroName
+        With .TextFrame2
+            .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
+            .VerticalAnchor = msoAnchorMiddle
+            .WordWrap = msoFalse
+            With .TextRange
+                .Text = txt
+                .Font.Size = sz
+                .Font.Bold = IIf(isBold, msoTrue, msoFalse)
+                .Font.Fill.ForeColor.RGB = fontClr
+                .ParagraphFormat.Alignment = msoAlignCenter
+            End With
+        End With
+    End With
+    Set DashCalBox = s
+End Function
+
+Private Sub DashCalBuild(ByVal ws As Worksheet)
+    Dim s As Shape, i As Long, heads As Variant
+    If DashCalShapeExists(ws, "CAL_BG") Then Exit Sub
+    heads = Array("T2", "T3", "T4", "T5", "T6", "T7", "CN")
+    Set s = DashCalBox(ws, "CAL_BG", "", RGB(255, 255, 255), RGB(0, 0, 0), 9, False, "DashCalNoop")
+    s.Line.Visible = msoTrue
+    s.Line.ForeColor.RGB = RGB(31, 56, 100)
+    s.Line.Weight = 1.5
+    DashCalBox ws, "CAL_PREV", "<", RGB(31, 78, 121), RGB(255, 255, 255), 11, True, "DashCalPrev"
+    DashCalBox ws, "CAL_NEXT", ">", RGB(31, 78, 121), RGB(255, 255, 255), 11, True, "DashCalNext"
+    DashCalBox ws, "CAL_TITLE", "", RGB(255, 255, 255), RGB(16, 37, 66), 11, True, "DashCalNoop"
+    For i = 1 To 7
+        DashCalBox ws, "CAL_W" & i, CStr(heads(i - 1)), RGB(242, 244, 247), IIf(i = 7, RGB(192, 0, 0), RGB(64, 64, 64)), 9, True, "DashCalNoop"
+    Next i
+    For i = 1 To 42
+        DashCalBox ws, "CAL_D" & i, "", RGB(255, 255, 255), RGB(0, 0, 0), 10, False, "DashCalPick"
+    Next i
+    DashCalBox ws, "CAL_TODAY", "Hom nay", RGB(255, 242, 204), RGB(16, 37, 66), 10, True, "DashCalToday"
+End Sub
+
+Private Sub DashCalLayout(ByVal ws As Worksheet, ByVal L As Single, ByVal T As Single)
+    Dim i As Long, totalW As Single
+    Const CW As Single = 26
+    Const CH As Single = 20
+    totalW = 7 * CW + 10
+    With ws.Shapes("CAL_BG")
+        .Left = L: .Top = T: .Width = totalW: .Height = 196
+    End With
+    With ws.Shapes("CAL_PREV")
+        .Left = L + 5: .Top = T + 4: .Width = CW: .Height = 20
+    End With
+    With ws.Shapes("CAL_NEXT")
+        .Left = L + 5 + 6 * CW: .Top = T + 4: .Width = CW: .Height = 20
+    End With
+    With ws.Shapes("CAL_TITLE")
+        .Left = L + 5 + CW: .Top = T + 4: .Width = 5 * CW: .Height = 20
+    End With
+    For i = 1 To 7
+        With ws.Shapes("CAL_W" & i)
+            .Left = L + 5 + (i - 1) * CW: .Top = T + 26: .Width = CW: .Height = 16
+        End With
+    Next i
+    For i = 1 To 42
+        With ws.Shapes("CAL_D" & i)
+            .Left = L + 5 + ((i - 1) Mod 7) * CW
+            .Top = T + 44 + ((i - 1) \ 7) * CH
+            .Width = CW: .Height = CH
+        End With
+    Next i
+    With ws.Shapes("CAL_TODAY")
+        .Left = L + 5: .Top = T + 44 + 6 * CH + 4: .Width = totalW - 10: .Height = 20
+    End With
+End Sub
+
+Private Sub DashCalDraw(ByVal ws As Worksheet)
+    Dim firstDay As Date, offset As Long, daysIn As Long, i As Long, d As Long
+    Dim dd As Date, sel As Date, s As Shape, v As Variant
+    firstDay = DateSerial(mDcYear, mDcMonth, 1)
+    offset = Weekday(firstDay, vbMonday) - 1
+    daysIn = Day(DateSerial(mDcYear, mDcMonth + 1, 0))
+    ws.Shapes("CAL_TITLE").TextFrame2.TextRange.Text = "Thang " & mDcMonth & "/" & mDcYear
+    v = ws.Range(mDcTarget).Value
+    If IsDate(v) Then sel = CDate(v) Else sel = 0
+    For i = 1 To 42
+        d = i - offset
+        Set s = ws.Shapes("CAL_D" & i)
+        If d >= 1 And d <= daysIn Then
+            dd = DateSerial(mDcYear, mDcMonth, d)
+            s.TextFrame2.TextRange.Text = CStr(d)
+            s.Fill.ForeColor.RGB = RGB(255, 255, 255)
+            s.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = IIf(((i - 1) Mod 7) = 6, RGB(192, 0, 0), RGB(0, 0, 0))
+            If dd = Date Then s.Fill.ForeColor.RGB = RGB(255, 230, 153)
+            If sel <> 0 And dd = sel Then
+                s.Fill.ForeColor.RGB = RGB(31, 78, 121)
+                s.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+            End If
+            s.Visible = msoTrue
+        Else
+            s.Visible = msoFalse
+        End If
+    Next i
+End Sub
+
+Public Sub DashCalNoop()
+    'chi de Shape khong bi chon khi bam vao
+End Sub
+
+Public Sub DashCalPrev()
+    mDcMonth = mDcMonth - 1
+    If mDcMonth < 1 Then
+        mDcMonth = 12
+        mDcYear = mDcYear - 1
+    End If
+    DashCalDraw ActiveSheet
+End Sub
+
+Public Sub DashCalNext()
+    mDcMonth = mDcMonth + 1
+    If mDcMonth > 12 Then
+        mDcMonth = 1
+        mDcYear = mDcYear + 1
+    End If
+    DashCalDraw ActiveSheet
+End Sub
+
+Public Sub DashCalPick()
+    Dim ws As Worksheet, nm As String, d As Long
+    If Len(mDcTarget) = 0 Then Exit Sub
+    Set ws = ActiveSheet
+    nm = CStr(Application.Caller)
+    d = CLng(ws.Shapes(nm).TextFrame2.TextRange.Text)
+    DashCalCommit ws, DateSerial(mDcYear, mDcMonth, d)
+End Sub
+
+Public Sub DashCalToday()
+    If Len(mDcTarget) = 0 Then Exit Sub
+    DashCalCommit ActiveSheet, Date
+End Sub
+
+Private Sub DashCalCommit(ByVal ws As Worksheet, ByVal dt As Date)
+    DashCalHide ws
+    ws.Range(mDcTarget).Value = dt          'kich hoat Worksheet_Change -> UpdateDashboard
+    ws.Range("A7").Select                   'de lan sau bam lai vao o ngay van hien lich
+End Sub
+------------------------------ HET CODE ----------------------------------
+
+==============================================================================
+BUOC 4 - [D] CODE SHEET "Dashboard"
+==============================================================================
+
+Trong VBE double-click sheet Dashboard (muc Microsoft Excel Objects). Giu nguyen Worksheet_Change va
+Worksheet_Activate co san, dan THEM xuong cuoi:
+
+------------------------------ BAT DAU CODE ------------------------------
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    On Error Resume Next
+    DashCalOnSelection Target
+End Sub
+
+Private Sub Worksheet_Deactivate()
+    On Error Resume Next
+    DashCalHide Me
+End Sub
+------------------------------ HET CODE ----------------------------------
+
+==============================================================================
+BUOC 5 - [E] MODULE NHAP LIEU (module co Sub SaveDefectRecords)
+==============================================================================
+
+5.1  Khu khai bao hang so dau module: TIM dong
+       Public Const TBL_SUMMARY As String = "tblSummary"
+     THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+Public Const TBL_COLORS As String = "tblColors"
+------------------------------ HET CODE ----------------------------------
+
+5.2  Trong Sub InitWorkbook: TIM 3 dong
+       EnsureNamedLists
+       ForceCloseCalendar
+       ApplyValidation ws
+     THAY BANG (them EnsureColorSupport ws o giua):
+
+------------------------------ BAT DAU CODE ------------------------------
+    EnsureNamedLists
+    EnsureColorSupport ws
+    ForceCloseCalendar
+    ApplyValidation ws
+------------------------------ HET CODE ----------------------------------
+
+5.3  Trong Sub ApplyValidation: TIM doan cuoi (o B26, danh sach "Qty,Records") ... End With va dong End Sub ngay sau.
+     THEM TRUOC dong End Sub cua ApplyValidation:
+
+------------------------------ BAT DAU CODE ------------------------------
+    With ws.Range("B8").Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="=INDIRECT(""tblColors[PaintColor]"")"
+        .IgnoreBlank = True
+        .InCellDropdown = True
+        .ErrorTitle = "Paint Color"
+        .ErrorMessage = "Hay chon mau son trong danh sach (MASTER > tblColors)."
+    End With
+------------------------------ HET CODE ----------------------------------
+
+5.4  Trong Sub ApplyProtection: TIM dong  ws.Range("D4:D7").Locked = False   -> THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+    ws.Range("B8").Locked = False
+------------------------------ HET CODE ----------------------------------
+
+5.5  Trong Sub ResetInputFields: TIM dong  ws.Range("B3").ClearContents   -> THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+    ws.Range("B8").ClearContents
+------------------------------ HET CODE ----------------------------------
+
+5.6  Trong Function ValidateInput: TIM dong comment
+       '3. Cell da chon
+     THEM TRUOC no:
+
+------------------------------ BAT DAU CODE ------------------------------
+    '2b. Paint Color
+    If Len(Trim$(CStr(ws.Range("B8").Value))) = 0 Then
+        msg = "Chua chon Paint Color (o B8)."
+        Exit Function
+    End If
+------------------------------ HET CODE ----------------------------------
+
+5.7  Trong Sub SaveDefectRecords (4 cho nho):
+     (a) TIM dong  Dim viewName As String   -> THAY BANG:
+
+------------------------------ BAT DAU CODE ------------------------------
+    Dim viewName As String, paintColor As String, ixColor As Long
+------------------------------ HET CODE ----------------------------------
+     (b) TIM dong  Set loDB = GetTable(SH_DB, TBL_DEFECTS)   -> THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+    EnsureDefectColorColumn loDB
+    ixColor = colIdx(loDB, "PaintColor")
+------------------------------ HET CODE ----------------------------------
+     (c) TIM dong  desc = CStr(ws.Range("D7").Value)   -> THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+    paintColor = Trim$(CStr(ws.Range("B8").Value))
+------------------------------ HET CODE ----------------------------------
+     (d) TIM dong  arr(i, ix(17)) = "Open"   -> THEM SAU:
+
+------------------------------ BAT DAU CODE ------------------------------
+                arr(i, ixColor) = paintColor
+------------------------------ HET CODE ----------------------------------
+
+5.8  Xuong CUOI module, dan NGUYEN KHOI code sau (bang mau, cot PaintColor, o Paint Color B8):
+
+------------------------------ BAT DAU CODE ------------------------------
+'=====================================================================
+' 11. PAINT COLOR (mau son xe): bang mau (MASTER > tblColors), cot PaintColor (tblDefects), o chon MAP_VEHICLE!B8
+'=====================================================================
+Public Sub EnsureColorSupport(ByVal ws As Worksheet)
+    'Idempotent. Goi tu InitWorkbook (sheet MAP_VEHICLE dang UNPROTECT).
+    Dim wsM As Worksheet, lo As ListObject
+    On Error GoTo EH
+    Set wsM = GetSheet(SH_MASTER)
+    EnsureTable wsM, TBL_COLORS, "AC1", Array("PaintColor", "Hex"), _
+        Array(Array("White", "#FFFFFF"), Array("Black", "#000000"), Array("Silver", "#C0C0C0"), _
+              Array("Gray", "#808080"), Array("Red", "#C00000"), Array("Blue", "#1F4E79"), _
+              Array("Green", "#2E7D32"), Array("Yellow", "#FFD966"), Array("Orange", "#ED7D31"), _
+              Array("Brown", "#7F6000"))
+    wsM.Columns("AB").ColumnWidth = 3
+    wsM.Columns("AC:AD").ColumnWidth = 14
+
+    Set lo = GetTable(SH_DB, TBL_DEFECTS)
+    EnsureDefectColorColumn lo
+
+    If StrComp(CStr(ws.Range("A8").Value), "Paint Color", vbTextCompare) <> 0 Then
+        ws.Rows(8).RowHeight = 22
+        ws.Range("A8").Value = "Paint Color"
+        With ws.Range("A8")
+            .Interior.Color = RGB(31, 78, 121)
+            .Font.Color = RGB(255, 255, 255)
+            .Font.Bold = True
+            .VerticalAlignment = xlCenter
+        End With
+        With ws.Range("B8")
+            .NumberFormat = "@"
+            .Interior.Color = RGB(255, 242, 204)
+            .Font.Bold = True
+            .HorizontalAlignment = xlLeft
+            .VerticalAlignment = xlCenter
+        End With
+        With ws.Range("C8:D8")
+            .Merge
+            .WrapText = True
+            .VerticalAlignment = xlCenter
+            .Font.Italic = True
+            .Font.Size = 9
+            .Font.Color = RGB(90, 90, 90)
+        End With
+        ws.Range("C8").Value = "Mau son xe (bat buoc). Danh sach: MASTER > tblColors."
+        With ws.Range("A8:D8").Borders
+            .LineStyle = xlContinuous
+            .Color = RGB(150, 150, 150)
+            .Weight = xlThin
+        End With
+        RepositionPanelButtons ws
+    End If
+    ws.Range("B8").Locked = False
+    Exit Sub
+EH:
+    MsgBox "EnsureColorSupport loi: " & Err.Description, vbExclamation
+End Sub
+
+'Them cot PaintColor vao cuoi tblDefects neu chua co (du lieu cu de trong)
+Private Sub EnsureDefectColorColumn(ByVal lo As ListObject)
+    Dim lc As ListColumn, found As Boolean
+    For Each lc In lo.ListColumns
+        If StrComp(lc.Name, "PaintColor", vbTextCompare) = 0 Then
+            found = True
+            Exit For
+        End If
+    Next lc
+    If Not found Then
+        Set lc = lo.ListColumns.Add
+        lc.Name = "PaintColor"
+    End If
+    If Not lo.DataBodyRange Is Nothing Then lo.ListColumns("PaintColor").DataBodyRange.NumberFormat = "@"
+    lo.Parent.Columns(lo.ListColumns("PaintColor").Range.Column).ColumnWidth = 16
+End Sub
+
+'Hang 8 cao hon (8 -> 22 pt) nen cac nut o panel trai duoc dich xuong theo
+Private Sub RepositionPanelButtons(ByVal ws As Worksheet)
+    Dim arr As Variant, i As Long, s As Shape
+    arr = Array(Array("BTN_SAVE", "A9:D11"), Array("BTN_CLEAR", "A12:B13"), Array("BTN_RESET", "C12:D13"), _
+                Array("BTN_SHOW", "A27:B28"), Array("BTN_HIDE", "C27:D28"))
+    For i = 0 To UBound(arr)
+        Set s = FindShape(ws, CStr(arr(i)(0)))
+        If Not s Is Nothing Then s.Top = ws.Range(CStr(arr(i)(1))).Top + 2
+    Next i
+End Sub
+------------------------------ HET CODE ----------------------------------
+
+==============================================================================
+BUOC 6 - CHAY THU
+==============================================================================
+  1. Debug > Compile VBAProject: khong bao loi. (Loi "Variable not defined" -> xem muc 7.)
+  2. Luu file (.xlsm), DONG roi MO LAI file va bam Enable Macros.
+     (Neu khong muon dong/mo: trong VBE bam vao Sub InitWorkbook, bam F5 de chay.)
+     InitWorkbook se tu: tao MASTER > tblColors (cot AC:AD), them cot PaintColor cuoi tblDefects,
+     tao o Paint Color (MAP_VEHICLE!B8) va dich cac nut xuong 14 pt.
+  3. Sheet MAP_VEHICLE: chon Model > VIN > Paint Color > Defect Type > ... > SAVE (Paint Color bat buoc).
+  4. Sheet Dashboard: bam REFRESH DASHBOARD. Can thay: bieu do tron (H45:N58), bieu do ti le loi/xe (A60:J74),
+     bieu do theo mau (K60:N74), heatmap (tu hang 94). Hang 60-75 bi xoa noi dung cu (bang Top 3) la dung.
+  5. Bam vao o From date / To date -> hien lich. Chon ngay -> Dashboard tu cap nhat.
+  6. Du lieu cu chua co mau se hien thanh nhom "(Chua ghi mau)" tren bieu do mau son.
+
+==============================================================================
+7. LOI THUONG GAP
+==============================================================================
+  - "Variable not defined" tai SH_MAP / SH_MASTER / TBL_MODELS / DashSheet / ROW_DT_HDR / ROW_T3_FIRST ...:
+      cac hang so/ham do dang Private o module khac -> doi sang Public.
+  - "Ambiguous name detected": ten Sub bi trung (da co Sub cung ten o module khac) -> doi ten Sub moi (hoac Sub cu).
+  - Heatmap bao "vung qua thap": tang ROW_DT_HDR (hang bat dau bang Defect Detail) trong khu khai bao hang so.
+  - Heatmap khong ve hinh: kiem tra MASTER > tblModels cot ImageShapeName co dung ten hinh tren MAP_VEHICLE;
+      bam REFRESH de chup lai hinh (khi doi bo loc chi ve lai marker, khong chup lai hinh).
+  - Khong thay o Paint Color: chay InitWorkbook (F5) mot lan; kiem tra sheet MAP_VEHICLE co dang Unprotect khong.
+  - Lich khong hien: kiem tra da dan Worksheet_SelectionChange vao DUNG sheet Dashboard va o From/To la A5 / C5
+      (hang so F_FROM / F_TO trong module chinh).
+  - Muon bo thay doi: dung ban backup da sao o buoc 1.
+
+==============================================================================
+8. GHI CHU VE CACH TINH
+==============================================================================
+  - Ti le loi / xe (theo ngay) = tong loi trong ngay / so xe co loi trong ngay (so VIN khac nhau).
+    Tieu de bieu do: ti le ca ky = tong loi / so VIN khac nhau trong ky, vi du "50% (12/24)".
+  - Ti le theo mau son / Defect Type (bieu do tron) = loi cua nhom / tong loi, vi du "50% (12/24)".
+  - Heatmap: Top 3 o Grid co nhieu loi nhat cua tung Defect Type trong tung Model; vi tri = ((cot-0.5)/Cols, (hang-0.5)/Rows)
+    tren hinh Master. Bo loc Dashboard (ngay, Model, Shift, Defect Type, Cell ID) deu co tac dung.
